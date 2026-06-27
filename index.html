@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Mycelium — First Bloom (M1)</title>
+<style>
+  :root { --bg:#0e1118; --panel:#151a24; --ink:#cfd6e4; --muted:#7a8499;
+          --sugar:#e0a93f; --mineral:#bd6b22; --water:#3f82d6; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+         display:flex; justify-content:center; padding:14px; }
+  #game { display:flex; flex-direction:column; gap:8px; }
+  h1.title { margin:0; font-size:15px; letter-spacing:2px; color:var(--muted); font-weight:600; }
+  h1.title b { color:#bfffdc; }
+  #hud { display:flex; flex-wrap:wrap; gap:14px; align-items:center;
+         background:var(--panel); border:1px solid #222b3a; border-radius:8px; padding:8px 12px; font-size:13px; }
+  .chip { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:middle; }
+  .res, .stat { white-space:nowrap; }
+  .res b, .stat b { color:#fff; font-variant-numeric: tabular-nums; }
+  .rate { font-size:11px; margin-left:4px; font-variant-numeric: tabular-nums; }
+  .stat { color:var(--muted); }
+  .sep { width:1px; align-self:stretch; background:#222b3a; }
+  #stage { position:relative; line-height:0; }
+  canvas { border:1px solid #222b3a; border-radius:6px; image-rendering:pixelated; display:block; }
+  #banner { position:absolute; top:10px; left:50%; transform:translateX(-50%);
+            padding:6px 14px; border-radius:6px; font-size:13px; font-weight:600;
+            color:#1a1208; background:#ffb24a; box-shadow:0 2px 10px #0008; }
+  #banner.warn { background:#ffb24a; }
+  #banner.active { background:#ff5a3c; color:#fff; animation:flash .5s steps(2,end) infinite; }
+  #banner.starve { background:#e7c34a; }
+  #banner.hidden { display:none; }
+  @keyframes flash { 50% { opacity:.55; } }
+  #pauseBadge { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+                font-size:30px; letter-spacing:3px; color:#fff; text-shadow:0 2px 12px #000; }
+  #pauseBadge.hidden { display:none; }
+  #cursor { min-height:16px; font-size:12px; color:var(--muted); }
+  #help { font-size:12px; color:var(--muted); }
+  #help b { color:#aeb8cc; }
+  #overlay { position:absolute; inset:0; background:rgba(8,10,15,.82);
+             display:flex; align-items:center; justify-content:center; line-height:1.5; }
+  #overlay.hidden { display:none; }
+  .panel { background:var(--panel); border:1px solid #2a344a; border-radius:12px;
+           padding:26px 32px; text-align:center; max-width:360px; }
+  .panel h1 { margin:0 0 10px; font-size:20px; color:#ff8e6a; }
+  .panel p { margin:0; font-size:13px; color:var(--ink); }
+  .btns { margin-top:20px; display:flex; gap:10px; justify-content:center; }
+  button { font:inherit; font-size:13px; padding:9px 16px; border-radius:8px; cursor:pointer;
+           border:1px solid #34507a; background:#1d2a40; color:#cfe2ff; }
+  button:hover { background:#243651; }
+</style>
+</head>
+<body>
+  <div id="game">
+    <h1 class="title">MYCELIUM · <b>FIRST BLOOM</b> · m1 prototype</h1>
+    <div id="hud">
+      <span class="res"><i class="chip" style="background:var(--sugar)"></i>Sugar <b id="sugar">0</b><span class="rate" id="sugarRate"></span></span>
+      <span class="res"><i class="chip" style="background:var(--mineral)"></i>Minerals <b id="mineral">0</b><span class="rate" id="mineralRate"></span></span>
+      <span class="res"><i class="chip" style="background:var(--water)"></i>Water <b id="water">0</b><span class="rate" id="waterRate"></span></span>
+      <div class="sep"></div>
+      <span class="stat">Size <b id="size">1</b></span>
+      <span class="stat">Score <b id="peak">1</b></span>
+      <span class="stat">Time <b id="time">0:00</b></span>
+      <span class="stat">Seed <b id="seed">—</b></span>
+    </div>
+    <div id="stage">
+      <canvas id="c"></canvas>
+      <div id="banner" class="hidden"></div>
+      <div id="pauseBadge" class="hidden">⏸ PAUSED</div>
+      <div id="overlay" class="hidden">
+        <div class="panel">
+          <h1 id="ovTitle">Network Collapsed</h1>
+          <p id="ovBody"></p>
+          <div class="btns">
+            <button id="btnNew">New Run (R)</button>
+            <button id="btnReplay">Replay Seed</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="cursor"></div>
+    <div id="help"><b>Left-drag</b> grow toward · <b>Right-drag</b> retract · <b>Space</b> pause · <b>R</b> new run · reach Sugar near the surface, but stay clear of fire</div>
+  </div>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
