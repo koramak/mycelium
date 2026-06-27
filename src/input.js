@@ -28,7 +28,7 @@ export function attachInput(canvas, ctx, ui) {
     if (!path || !path.length) { ui.hoverPath = null; ui.hoverCost = null; ui.reachable = !!path; return; }
     ui.hoverPath = path; ui.reachable = true;
     const c = sim.pathResourceCost(path);
-    ui.hoverCost = { tiles: path.length, sugar: c.sugar, water: c.water, mineral: c.mineral };
+    ui.hoverCost = { tiles: path.length, sugar: c.sugar, water: c.water };
   }
 
   canvas.addEventListener('contextmenu', e => e.preventDefault());

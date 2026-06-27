@@ -95,7 +95,26 @@ export function createRenderer(canvas, sim) {
   function drawPlanned() {
     const st = sim.state;
     ctx.fillStyle = PAL.ghost;
-    for (const t of st.tiles) if (t.planned) ctx.fillRect(cx(t.x) + 4, cy(t.y) + 4, TILE - 8, TILE - 8);
+    for (const t of st.tiles) if (t.planned) ctx.fillRect(cx(t.x) + 5, cy(t.y) + 5, TILE - 10, TILE - 10);
+    // animated flow line along the growth queue — the trail visibly moving out
+    const q = st.queue;
+    if (q.length) {
+      ctx.save();
+      ctx.lineCap = 'round'; ctx.lineWidth = 2.5;
+      ctx.setLineDash([5, 7]); ctx.lineDashOffset = -(st.time * 60) % 12;
+      ctx.strokeStyle = st.bottleneck ? 'rgba(255,170,80,0.95)' : 'rgba(170,255,215,0.9)';
+      let sx = mx(q[0].x), sy = my(q[0].y);
+      for (const [nx, ny] of [[q[0].x + 1, q[0].y], [q[0].x - 1, q[0].y], [q[0].x, q[0].y + 1], [q[0].x, q[0].y - 1]]) {
+        if (nx >= 0 && ny >= 0 && nx < W && ny < H && st.tiles[ny * W + nx].hypha) { sx = mx(nx); sy = my(ny); break; }
+      }
+      ctx.beginPath(); ctx.moveTo(sx, sy);
+      for (const p of q) ctx.lineTo(mx(p.x), my(p.y));
+      ctx.stroke();
+      const tgt = q[q.length - 1];
+      ctx.setLineDash([]); ctx.lineWidth = 1.5; ctx.strokeStyle = st.bottleneck ? '#ffaa50' : '#bfffdc';
+      ctx.strokeRect(cx(tgt.x) + 1, cy(tgt.y) + 1, TILE - 2, TILE - 2);
+      ctx.restore();
+    }
   }
 
   function drawHyphae() {
@@ -120,11 +139,13 @@ export function createRenderer(canvas, sim) {
     // tips + nodes
     ctx.fillStyle = PAL.hypha;
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { if (st.tiles[y * W + x].hypha) { ctx.beginPath(); ctx.arc(mx(x), my(y), 2, 0, 7); ctx.fill(); } }
-    // core pulse
-    const pulse = 0.5 + 0.5 * Math.sin(st.time * 4);
-    const r = TILE * (0.45 + 0.12 * pulse);
-    ctx.fillStyle = `rgba(196,255,221,${0.25 + 0.25 * pulse})`; ctx.beginPath(); ctx.arc(mx(st.core.x), my(st.core.y), r * 1.7, 0, 7); ctx.fill();
-    ctx.fillStyle = PAL.core; ctx.beginPath(); ctx.arc(mx(st.core.x), my(st.core.y), r * 0.7, 0, 7); ctx.fill();
+    // core — grows with core level, pulses faster while actively feeding
+    const lvl = st.coreLevel || 1;
+    const speed = st.growthActive ? 7 : 4;
+    const pulse = 0.5 + 0.5 * Math.sin(st.time * speed);
+    const base = TILE * (0.5 + 0.13 * (lvl - 1));
+    ctx.fillStyle = `rgba(196,255,221,${0.22 + 0.22 * pulse})`; ctx.beginPath(); ctx.arc(mx(st.core.x), my(st.core.y), base * (1.3 + 0.25 * pulse), 0, 7); ctx.fill();
+    ctx.fillStyle = PAL.core; ctx.beginPath(); ctx.arc(mx(st.core.x), my(st.core.y), base * 0.62, 0, 7); ctx.fill();
   }
 
   function drawFire() {

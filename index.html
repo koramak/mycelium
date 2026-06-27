@@ -53,18 +53,26 @@
   #controls button { padding:11px 16px; font-size:14px; min-height:44px; }
   #btnMode { background:#1f3a2b; border-color:#345040; color:#cfeede; }
   #btnMode.retract { background:#3a2233; border-color:#7a3450; color:#ffd0e0; }
+  #btnUpgrade { background:#2c2440; border-color:#5a4a86; color:#ddd0ff; }
+  button:disabled { opacity:.4; cursor:default; }
+  .grp { font-size:10px; letter-spacing:1.5px; color:var(--muted); align-self:center; }
+  #status { min-height:18px; font-size:13px; font-weight:600; color:#67718a; }
 </style>
 </head>
 <body>
   <div id="game">
     <h1 class="title">MYCELIUM · <b>FIRST BLOOM</b> · m1 prototype</h1>
     <div id="hud">
+      <span class="grp">GROW&nbsp;▸</span>
       <span class="res"><i class="chip" style="background:var(--sugar)"></i>Sugar <b id="sugar">0</b><span class="rate" id="sugarRate"></span></span>
-      <span class="res"><i class="chip" style="background:var(--mineral)"></i>Minerals <b id="mineral">0</b><span class="rate" id="mineralRate"></span></span>
       <span class="res"><i class="chip" style="background:var(--water)"></i>Water <b id="water">0</b><span class="rate" id="waterRate"></span></span>
+      <div class="sep"></div>
+      <span class="grp">BUILD&nbsp;▸</span>
+      <span class="res"><i class="chip" style="background:var(--mineral)"></i>Minerals <b id="mineral">0</b><span class="rate" id="mineralRate"></span></span>
       <div class="sep"></div>
       <span class="stat">Size <b id="size">1</b></span>
       <span class="stat">Score <b id="peak">1</b></span>
+      <span class="stat">Core <b id="coreLvl">Lv 1</b></span>
       <span class="stat">Time <b id="time">0:00</b></span>
       <span class="stat">Seed <b id="seed">—</b></span>
     </div>
@@ -83,13 +91,15 @@
         </div>
       </div>
     </div>
+    <div id="status"></div>
     <div id="controls">
       <button id="btnPause">⏸ Pause</button>
       <button id="btnMode">✚ Growing</button>
+      <button id="btnUpgrade">⬆ Grow Core</button>
       <button id="btnNew2">↻ New run</button>
     </div>
     <div id="cursor"></div>
-    <div id="help"><b>Tap</b> where you want to grow (it routes there automatically). Tap <b>Growing</b> to switch to <b>Retracting</b> — then tap your own threads to pull them back (e.g. off the surface before a fire). <b>Pause</b> anytime to plan.</div>
+    <div id="help"><b>🍬 Sugar + 💧 Water power growth</b> — keep BOTH flowing; your trail moves at the speed of whichever is scarcer. <b>⛰ Minerals</b> come from logs — bank them and tap <b>Grow Core</b> to grow faster &amp; store more. <b>Tap</b> to grow toward a spot · <b>Growing/Retracting</b> to pull threads back before a fire · <b>Pause</b> to plan.</div>
   </div>
   <script type="module" src="src/main.js"></script>
 </body>

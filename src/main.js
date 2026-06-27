@@ -54,9 +54,20 @@ function updateHud() {
   else b.className = 'hidden';
 
   const cur = $('cursor');
-  if (ui.hoverCost) { const c = ui.hoverCost; cur.textContent = c.tiles + ' tiles → 🍬' + Math.ceil(c.sugar) + '  💧' + Math.ceil(c.water) + '  ⛰' + Math.ceil(c.mineral); }
+  if (ui.hoverCost) { const c = ui.hoverCost; cur.textContent = c.tiles + ' tiles → 🍬' + Math.ceil(c.sugar) + '  💧' + Math.ceil(c.water); }
   else if (ui.hoverTile && !ui.reachable) cur.textContent = 'unreachable';
   else cur.textContent = '';
+
+  $('coreLvl').textContent = 'Lv ' + st.coreLevel;
+  const status = $('status');
+  if (!st.queue.length) { status.textContent = '◦ Idle — tap where you want to grow'; status.style.color = '#67718a'; }
+  else if (st.bottleneck === 'sugar') { status.textContent = '⚠ Stalled — need 🍬 Sugar (reach a tree root)'; status.style.color = '#ffb24a'; }
+  else if (st.bottleneck === 'water') { status.textContent = '⚠ Stalled — need 💧 Water (reach a pocket)'; status.style.color = '#ffb24a'; }
+  else { status.textContent = '▸ Growing…'; status.style.color = '#7fe0a0'; }
+  const uc = ctx.sim.upgradeCost();
+  const ub = $('btnUpgrade');
+  ub.textContent = '⬆ Grow Core (' + uc + '⛰)';
+  ub.disabled = st.res.mineral < uc;
 
   $('btnPause').textContent = paused ? '▶ Resume' : '⏸ Pause';
   const retract = ui.mode === 'retract';
@@ -67,8 +78,8 @@ function updateHud() {
 function showOverlay(r) {
   const ov = $('overlay'); if (!ov.classList.contains('hidden')) return;
   const cause = r.cause === 'burned' ? 'Your core burned in the wildfire.' : 'Your network starved and collapsed.';
-  $('ovBody').innerHTML = cause + '<br><br>Peak network size: <b>' + r.peak + '</b><br>Survived: <b>' + fmtTime(r.time) +
-    '</b><br>Seed: <b>' + r.seed + '</b>';
+  $('ovBody').innerHTML = cause + '<br><br>Peak network size: <b>' + r.peak + '</b><br>Core level: <b>' + r.coreLevel +
+    '</b><br>Survived: <b>' + fmtTime(r.time) + '</b><br>Seed: <b>' + r.seed + '</b>';
   ov.classList.remove('hidden');
 }
 
@@ -93,6 +104,7 @@ $('btnReplay').addEventListener('click', () => newRun(ctx.sim.state.seed));
 $('btnNew2').addEventListener('click', () => newRun(randSeed()));
 $('btnPause').addEventListener('click', () => { if (!ctx.sim.state.over) paused = !paused; });
 $('btnMode').addEventListener('click', () => { ui.mode = ui.mode === 'grow' ? 'retract' : 'grow'; });
+$('btnUpgrade').addEventListener('click', () => ctx.sim.upgradeCore());
 
 newRun(urlSeed() ?? randSeed());
 attachInput(canvas, ctx, ui);
