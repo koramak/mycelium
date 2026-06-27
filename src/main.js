@@ -7,7 +7,7 @@ import { attachInput } from './input.js';
 const canvas = document.getElementById('c');
 const $ = id => document.getElementById(id);
 const ctx = { sim: null };
-const ui = { hoverTile: null, hoverPath: null, hoverCost: null, reachable: false };
+const ui = { hoverTile: null, hoverPath: null, hoverCost: null, reachable: false, mode: 'grow' };
 
 const STEP = 1 / 30;
 let renderer, paused = false, acc = 0, last = performance.now();
@@ -57,6 +57,11 @@ function updateHud() {
   if (ui.hoverCost) { const c = ui.hoverCost; cur.textContent = c.tiles + ' tiles → 🍬' + Math.ceil(c.sugar) + '  💧' + Math.ceil(c.water) + '  ⛰' + Math.ceil(c.mineral); }
   else if (ui.hoverTile && !ui.reachable) cur.textContent = 'unreachable';
   else cur.textContent = '';
+
+  $('btnPause').textContent = paused ? '▶ Resume' : '⏸ Pause';
+  const retract = ui.mode === 'retract';
+  $('btnMode').textContent = retract ? '✂ Retracting' : '✚ Growing';
+  $('btnMode').classList.toggle('retract', retract);
 }
 
 function showOverlay(r) {
@@ -85,6 +90,9 @@ window.addEventListener('keydown', e => {
 });
 $('btnNew').addEventListener('click', () => newRun(randSeed()));
 $('btnReplay').addEventListener('click', () => newRun(ctx.sim.state.seed));
+$('btnNew2').addEventListener('click', () => newRun(randSeed()));
+$('btnPause').addEventListener('click', () => { if (!ctx.sim.state.over) paused = !paused; });
+$('btnMode').addEventListener('click', () => { ui.mode = ui.mode === 'grow' ? 'retract' : 'grow'; });
 
 newRun(urlSeed() ?? randSeed());
 attachInput(canvas, ctx, ui);

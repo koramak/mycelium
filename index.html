@@ -11,7 +11,7 @@
   body { margin:0; background:var(--bg); color:var(--ink);
          font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
          display:flex; justify-content:center; padding:14px; }
-  #game { display:flex; flex-direction:column; gap:8px; }
+  #game { display:flex; flex-direction:column; gap:8px; width:min(980px, calc(100vw - 24px)); }
   h1.title { margin:0; font-size:15px; letter-spacing:2px; color:var(--muted); font-weight:600; }
   h1.title b { color:#bfffdc; }
   #hud { display:flex; flex-wrap:wrap; gap:14px; align-items:center;
@@ -23,7 +23,7 @@
   .stat { color:var(--muted); }
   .sep { width:1px; align-self:stretch; background:#222b3a; }
   #stage { position:relative; line-height:0; }
-  canvas { border:1px solid #222b3a; border-radius:6px; image-rendering:pixelated; display:block; }
+  canvas { border:1px solid #222b3a; border-radius:6px; image-rendering:pixelated; display:block; max-width:100%; touch-action:none; }
   #banner { position:absolute; top:10px; left:50%; transform:translateX(-50%);
             padding:6px 14px; border-radius:6px; font-size:13px; font-weight:600;
             color:#1a1208; background:#ffb24a; box-shadow:0 2px 10px #0008; }
@@ -49,6 +49,10 @@
   button { font:inherit; font-size:13px; padding:9px 16px; border-radius:8px; cursor:pointer;
            border:1px solid #34507a; background:#1d2a40; color:#cfe2ff; }
   button:hover { background:#243651; }
+  #controls { display:flex; gap:8px; flex-wrap:wrap; }
+  #controls button { padding:11px 16px; font-size:14px; min-height:44px; }
+  #btnMode { background:#1f3a2b; border-color:#345040; color:#cfeede; }
+  #btnMode.retract { background:#3a2233; border-color:#7a3450; color:#ffd0e0; }
 </style>
 </head>
 <body>
@@ -79,8 +83,13 @@
         </div>
       </div>
     </div>
+    <div id="controls">
+      <button id="btnPause">⏸ Pause</button>
+      <button id="btnMode">✚ Growing</button>
+      <button id="btnNew2">↻ New run</button>
+    </div>
     <div id="cursor"></div>
-    <div id="help"><b>Left-drag</b> grow toward · <b>Right-drag</b> retract · <b>Space</b> pause · <b>R</b> new run · reach Sugar near the surface, but stay clear of fire</div>
+    <div id="help"><b>Tap</b> where you want to grow (it routes there automatically). Tap <b>Growing</b> to switch to <b>Retracting</b> — then tap your own threads to pull them back (e.g. off the surface before a fire). <b>Pause</b> anytime to plan.</div>
   </div>
   <script type="module" src="src/main.js"></script>
 </body>

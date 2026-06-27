@@ -24,7 +24,7 @@ export function createRenderer(canvas, sim) {
   const lw = W * TILE, lh = H * TILE;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   canvas.width = lw * dpr; canvas.height = lh * dpr;
-  canvas.style.width = lw + 'px'; canvas.style.height = lh + 'px';
+  canvas.style.width = lw + 'px'; canvas.style.height = 'auto'; canvas.style.maxWidth = '100%';
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
   ctx.imageSmoothingEnabled = false;
