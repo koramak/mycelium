@@ -316,6 +316,12 @@ export function createSim(seed) {
   }
   function revealAllNetwork() { for (const t of tiles) if (t.hypha) revealAround(t.x, t.y); }
 
+  // Reusable Dijkstra scratch buffers — pathTo runs synchronously and isn't re-entrant,
+  // so sharing avoids allocating two W*H arrays on every hover/grow.
+  const distBuf = new Float64Array(W * H);
+  const prevBuf = new Int32Array(W * H);
+  let pendingRecompute = false;            // a log burst happened; resync the network
+
   // Multi-source Dijkstra from the whole network to (tx,ty). Returns ordered tiles to
   // grow (near -> far), [] if already reached, or null if unreachable.
   function pathTo(tx, ty) {
@@ -323,8 +329,8 @@ export function createSim(seed) {
     const target = tileAt(tx, ty);
     if (!target.passable) return null;
     if (target.hypha) return [];
-    const dist = new Float64Array(W * H).fill(Infinity);
-    const prev = new Int32Array(W * H).fill(-1);
+    const dist = distBuf, prev = prevBuf;
+    dist.fill(Infinity); prev.fill(-1);
     const heap = new Heap();
     for (const t of tiles) if (t.hypha) { dist[idx(t.x, t.y)] = 0; heap.push(0, idx(t.x, t.y)); }
     const ti = idx(tx, ty);
@@ -383,6 +389,7 @@ export function createSim(seed) {
       if (!t.hypha && t.passable) occupy(t);   // free — no sugar/water spent
       state.fx.push({ kind: 'burst', x: c.x, y: c.y, t: 0.8, max: 0.8 });
     }
+    pendingRecompute = true; // burst tiles were occupied out of order — fix distances
   }
 
   // BFS from core: set distances, drop hyphae no longer connected, recount size/water.
@@ -430,6 +437,7 @@ export function createSim(seed) {
   // ---- per-tick economy ----
   function economyStep(dt) {
     // 1) NITROGEN extraction — rate scales with how many tiles contact each node.
+    const nBefore = state.res.nitrogen;
     let nGain = 0;
     for (const n of state.nodes) {
       n.contacts = 0; n.rate = 0;
@@ -447,11 +455,13 @@ export function createSim(seed) {
       const y = Math.min(rate * dt, n.reserve);
       n.reserve -= y; n.rate = y / dt; nGain += y;
     }
+    const capN = capFor('nitrogen');
+    const wasted = Math.max(0, nBefore + nGain - capN); // overflow discarded this tick
     addRes('nitrogen', nGain);
 
     // 2) TREE EXCHANGE — connected trees pull nitrogen from the pool and return sugar.
     //    Hub trades first (best rate); distant roots mop up surplus once warmed up.
-    let sGain = 0, nSpent = 0;
+    let sGain = 0, nSpent = 0, bestEx = 0;
     const baseEx = tr => (tr.hub ? C.tree.hub : C.tree.distant).exchange;
     const sorted = [...state.trees].sort((a, b) => baseEx(b) - baseEx(a)); // best exchange first (hub leads)
     for (const tr of sorted) {
@@ -462,6 +472,7 @@ export function createSim(seed) {
       if (tr.connected) tr.warm = base.warmup <= 0 ? 1 : Math.min(1, tr.warm + warmupRate(base.warmup) * dt);
       else { tr.warm = base.warmup <= 0 ? 1 : 0; continue; }
       const exchange = base.exchange * exchangeMult();
+      if (exchange > bestEx) bestEx = exchange; // best rate among connected roots (for HUD)
       const through = base.throughput * throughputMult() * tr.warm;
       const take = Math.min(through * dt, state.res.nitrogen);
       if (take <= 0) continue;
@@ -483,14 +494,15 @@ export function createSim(seed) {
     if (state.res.sugar < 0) { state.res.sugar = 0; deficit = true; }
     if (state.res.water < 0) { state.res.water = 0; deficit = true; }
 
-    state.income.nitrogen = (nGain - nSpent) / dt;
+    // Nitrogen rate is the TRUE pool delta (so it reads ◦ when capped, not a false ▲).
+    state.income.nitrogen = (state.res.nitrogen - nBefore) / dt;
     state.income.sugar = sGain / dt - state.size * C.upkeep.sugar * upkeepMult();
     state.income.water = wGain / dt - state.size * C.upkeep.water * upkeepMult();
     // Pipeline readouts for the HUD: what you mine, what trees trade, and the rate.
     state.harvest = nGain / dt;
     state.trade = { nitrogen: nSpent / dt, sugar: sGain / dt };
-    state.exchangeRate = C.tree.hub.exchange * exchangeMult();
-    state.nitrogenFull = state.res.nitrogen >= capFor('nitrogen') - 0.01 && nGain > nSpent + 1e-4;
+    state.exchangeRate = bestEx > 0 ? bestEx : C.tree.hub.exchange * exchangeMult();
+    state.nitrogenFull = wasted > 1e-6; // genuinely discarding nitrogen at the cap
 
     if (deficit) {
       state.starving = true; state.starveTimer += dt;
@@ -557,6 +569,7 @@ export function createSim(seed) {
     if (state.over) return;
     state.time += dt;
     growStep(dt);
+    if (pendingRecompute) { recomputeNetwork(); pendingRecompute = false; } // resync after a log burst
     economyStep(dt);
     fogStep();
     decayFx(dt);
