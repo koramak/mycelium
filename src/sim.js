@@ -22,7 +22,7 @@ export const CONFIG = {
   AIR_ROWS: 5,
   start: { sugar: 42, water: 38, nitrogen: 0 },
 
-  cap: { sugar: 130, water: 110, nitrogen: 90 },
+  cap: { sugar: 130, water: 110, nitrogen: 120 },
 
   // Growth costs SUGAR + WATER together, scaled by tile difficulty (deeper = pricier).
   cost: { sugar: 1.0, water: 1.0 },
@@ -36,16 +36,17 @@ export const CONFIG = {
   water: { surface: 0.035, topsoil: 0.10, subsoil: 0.20, rock: 0.30 },
 
   // Nitrogen extraction: per contacting tile (on-node or orthogonally adjacent), per sec.
-  nitrogenPerContact: 0.7,
+  nitrogenPerContact: 0.9,
 
   // Tree exchange: nitrogen -> sugar. Hub trades best & instantly; distant roots are
   // weaker and ramp up over `warmup` seconds (the transport delay through the tree).
-  // `throughput` is the cap on nitrogen traded per second — deliberately low so that a
-  // well-colonized node banks raw nitrogen faster than one tree can trade it (the cue
-  // to tap another root or upgrade SYMBIOSIS). exchange = sugar returned per nitrogen.
+  // `throughput` (nitrogen traded/sec) is deliberately LOW so you out-mine it and raw
+  // nitrogen visibly STOCKPILES while you forage — trade capacity (more roots / SYMBIOSIS)
+  // is the real constraint. `exchange` (sugar per nitrogen) is high so sugar still flows
+  // even though each root trades slowly.
   tree: {
-    hub:     { exchange: 1.5, throughput: 2.5, warmup: 0 },
-    distant: { exchange: 0.9, throughput: 1.8, warmup: 7 },
+    hub:     { exchange: 2.2, throughput: 1.2, warmup: 0 },
+    distant: { exchange: 1.3, throughput: 0.9, warmup: 7 },
   },
 
   reveal: { base: 3, hint: 2 },         // fog reveal radius (tiles) + hint band beyond
