@@ -10,12 +10,13 @@ const PAL = {
   boulder: '#2a2833',
   fog: '#0c0d12', fogEdge: '#13141c',
   hypha: '#eafff1', glow: 'rgba(150,255,205,0.10)', core: '#c4ffdd',
-  nitro: '#7fde7a', sugar: '#f5c84a',
+  nitro: '#6ee86e', sugar: '#ffd23f',           // green nitrogen · yellow sugar
   node: '#3a5a2e', nodeBright: '#9be86a', nodeDeep: '#48506a',
-  root: '#7a5a38', rootLive: '#f5c84a',
+  root: '#7a5a38', rootLive: '#ffd23f',
   log: '#6b4a26', logGrain: '#8a5e30',
   ghost: 'rgba(170,255,215,0.20)',
-  trunk: '#4a3320', leaf: '#3f7d4a', leafDk: '#2f5d38',
+  bark: '#4a3320', barkLt: '#5e4329', barkDk: '#35251433',
+  leaf: '#3f7d4a', leafDk: '#2f5d38', leafLt: '#56995e',
 };
 
 function hexRgb(h) { return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; }
@@ -58,36 +59,37 @@ export function createRenderer(canvas, sim) {
 
   function spawnParticles(dt) {
     const st = sim.state;
-    if (dt <= 0 || particles.length > 90) return;
-    // nitrogen: spawn at actively-extracting node contact tiles, flow inward.
+    if (dt <= 0 || particles.length > 220) return;
+    // GREEN nitrogen: born at actively-extracting nodes, flows back toward the tree roots.
     for (const n of st.nodes) {
       if (n.rate <= 0.05) continue;
-      if (Math.random() < Math.min(0.9, n.rate * 0.25) * dt * 30 / 30) {
+      const p = Math.min(1, n.rate * 0.7) * dt * 6;       // denser stream the harder it gushes
+      if (Math.random() < p) {
         const c = n.tiles[(Math.random() * n.tiles.length) | 0];
-        // find a hypha contact tile to start from
         let start = tileAt(c.x, c.y);
         if (!start || !start.hypha) {
           for (const [nx, ny] of [[c.x + 1, c.y], [c.x - 1, c.y], [c.x, c.y + 1], [c.x, c.y - 1]]) {
             const t = tileAt(nx, ny); if (t && t.hypha) { start = t; break; }
           }
         }
-        if (start && start.hypha) particles.push({ kind: 'nitro', x: start.x, y: start.y, dir: -1, prog: 0, life: 6 });
+        if (start && start.hypha) particles.push({ kind: 'nitro', x: start.x, y: start.y, dir: -1, prog: 0, life: 7 });
       }
     }
-    // sugar: spawn at connected tree roots, flow outward to the front.
+    // YELLOW sugar: born at connected tree roots, flows out into the mycelium.
     for (const tr of st.trees) {
       if (!tr.connected || tr.sugarOut <= 0.05) continue;
-      if (Math.random() < Math.min(0.9, tr.sugarOut * 0.18) * dt) {
+      const p = Math.min(1, tr.sugarOut * 0.6) * dt * 6;
+      if (Math.random() < p) {
         const r = tr.roots[(Math.random() * tr.roots.length) | 0];
-        let start = tileAt(r.x, r.y);
-        if (start && start.hypha) particles.push({ kind: 'sugar', x: r.x, y: r.y, dir: 1, prog: 0, life: 6 });
-        else particles.push({ kind: 'sugar', x: st.core.x, y: st.core.y, dir: 1, prog: 0, life: 6 });
+        const start = tileAt(r.x, r.y);
+        if (start && start.hypha) particles.push({ kind: 'sugar', x: r.x, y: r.y, dir: 1, prog: 0, life: 7 });
+        else particles.push({ kind: 'sugar', x: st.core.x, y: st.core.y, dir: 1, prog: 0, life: 7 });
       }
     }
   }
 
   function stepParticles(dt) {
-    const speed = 9; // tiles/sec
+    const speed = 8; // tiles/sec
     for (const p of particles) {
       p.life -= dt;
       p.prog += speed * dt;
@@ -102,17 +104,23 @@ export function createRenderer(canvas, sim) {
   }
 
   function drawParticles() {
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
     for (const p of particles) {
       const fromX = p.px != null ? p.px : p.x, fromY = p.py != null ? p.py : p.y;
       const px = mx(fromX) + (mx(p.x) - mx(fromX)) * p.prog;
       const py = my(fromY) + (my(p.y) - my(fromY)) * p.prog;
-      ctx.fillStyle = p.kind === 'nitro' ? PAL.nitro : PAL.sugar;
-      ctx.globalAlpha = 0.85;
-      ctx.beginPath(); ctx.arc(px, py, 2.4, 0, 7); ctx.fill();
-      ctx.globalAlpha = 0.22;
-      ctx.beginPath(); ctx.arc(px, py, 5, 0, 7); ctx.fill();
+      const col = p.kind === 'nitro' ? PAL.nitro : PAL.sugar;
+      const fade = Math.min(1, p.life / 1.2);
+      const g = ctx.createRadialGradient(px, py, 0, px, py, 8);
+      g.addColorStop(0, col); g.addColorStop(0.5, col + '55'); g.addColorStop(1, col + '00');
+      ctx.globalAlpha = 0.55 * fade; ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(px, py, 8, 0, 7); ctx.fill();
+      ctx.globalAlpha = fade; ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(px, py, 1.7, 0, 7); ctx.fill();
+      ctx.globalAlpha = 0.9 * fade; ctx.fillStyle = col;
+      ctx.beginPath(); ctx.arc(px, py, 3.1, 0, 7); ctx.fill();
     }
-    ctx.globalAlpha = 1;
+    ctx.restore(); ctx.globalAlpha = 1;
   }
 
   function drawSky() {
@@ -194,22 +202,34 @@ export function createRenderer(canvas, sim) {
     }
   }
 
+  // Slender feeder roots descending from the great tree into the play area — the
+  // tappable exchange interfaces (hub + secondary). Faintly visible through fog; the
+  // interface glows gold once your network reaches it and sugar starts flowing.
   function drawRoots() {
     const st = sim.state;
     for (const tr of st.trees) {
+      if (!tr.roots.length) continue;
+      const sx = mx(tr.x), sTop = cy(st.groundY[tr.x]);
+      ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.strokeStyle = tr.connected ? 'rgba(255,210,63,0.55)' : 'rgba(122,90,56,0.5)';
+      ctx.lineWidth = tr.hub ? TILE * 0.5 : TILE * 0.34;
+      ctx.beginPath(); ctx.moveTo(sx, sTop - TILE * 0.4);
+      for (const r of tr.roots) ctx.lineTo(mx(r.x), my(r.y));
+      ctx.stroke(); ctx.restore();
+
       for (const r of tr.roots) {
         const t = st.tiles[r.y * W + r.x];
-        if (!t.revealed) continue;
-        const px = cx(r.x), py = cy(r.y);
-        ctx.fillStyle = PAL.root; ctx.fillRect(px + 5, py, TILE - 10, TILE);
-        ctx.fillStyle = '#5e4429'; ctx.fillRect(px + 6, py, 2, TILE);
+        const px = cx(r.x), py = cy(r.y), gx = mx(r.x), gy = my(r.y);
+        if (t.revealed) {
+          ctx.fillStyle = PAL.root; ctx.fillRect(px + 4, py, TILE - 8, TILE);
+          ctx.fillStyle = '#5e4429'; ctx.fillRect(px + 6, py, 2, TILE);
+        }
         if (tr.connected) { // gold exchange glow at a live interface
-          const gx = mx(r.x), gy = my(r.y);
           const pulse = 0.5 + 0.5 * Math.sin(st.time * 5 + r.x);
-          const g = ctx.createRadialGradient(gx, gy, 1, gx, gy, TILE * 0.9);
-          g.addColorStop(0, `rgba(245,200,74,${0.22 + 0.18 * pulse})`);
-          g.addColorStop(1, 'rgba(245,200,74,0)');
-          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(gx, gy, TILE * 0.9, 0, 7); ctx.fill();
+          const g = ctx.createRadialGradient(gx, gy, 1, gx, gy, TILE * 1.1);
+          g.addColorStop(0, `rgba(255,210,63,${0.26 + 0.2 * pulse})`);
+          g.addColorStop(1, 'rgba(255,210,63,0)');
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(gx, gy, TILE * 1.1, 0, 7); ctx.fill();
         }
       }
     }
@@ -229,23 +249,59 @@ export function createRenderer(canvas, sim) {
     }
   }
 
-  function drawTrees() {
+  // The whole map sits beneath ONE great tree: a canopy filling the sky and a thick
+  // trunk planted over the core.
+  function drawCanopy() {
     const st = sim.state;
-    for (const tr of st.trees) {
-      const bx = mx(tr.x), by = cy(tr.y);
-      const scale = tr.hub ? 1.25 : 1;
-      ctx.fillStyle = PAL.trunk; ctx.fillRect(bx - 2 * scale, by - TILE * 2 * scale, 4 * scale, TILE * 2 * scale);
-      for (let i = -3; i <= 3; i++) for (let j = -4; j <= 0; j++) {
-        if (i * i + (j + 2) * (j + 2) > 11) continue;
-        ctx.fillStyle = noise(tr.x + i, tr.y + j) > 0.2 ? PAL.leafDk : PAL.leaf;
-        ctx.fillRect(bx + i * TILE * 0.6 * scale - TILE * 0.3, by - TILE * 2 * scale + j * TILE * 0.7, TILE * 0.7 * scale, TILE * 0.7 * scale);
-      }
-      if (tr.connected) { // a fed tree glows gold
-        const g = ctx.createRadialGradient(bx, by - TILE * 2, 2, bx, by - TILE * 2, TILE * 3);
-        g.addColorStop(0, 'rgba(245,200,74,0.10)'); g.addColorStop(1, 'rgba(245,200,74,0)');
-        ctx.fillStyle = g; ctx.fillRect(bx - TILE * 3, by - TILE * 5, TILE * 6, TILE * 5);
-      }
+    const tX = mx(st.trunkX);
+    const baseY = cy(st.groundY[st.trunkX]);
+    let minG = lh; for (let x = 0; x < W; x++) minG = Math.min(minG, cy(st.groundY[x]));
+    const bottom = minG - 4, cyc = bottom * 0.22, ryc = bottom - cyc, rxc = lw * 0.6;
+
+    // trunk (behind the canopy) — thick, tapering, planted into the ground
+    const topW = TILE * 1.2, botW = TILE * 2.6;
+    ctx.fillStyle = PAL.bark;
+    ctx.beginPath();
+    ctx.moveTo(tX - topW / 2, 0); ctx.lineTo(tX + topW / 2, 0);
+    ctx.lineTo(tX + botW / 2, baseY); ctx.lineTo(tX - botW / 2, baseY);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = PAL.barkLt; ctx.fillRect(tX - topW / 2 + 1, 0, 3, baseY);
+
+    // canopy mass — big lumpy dome, overflowing the top & side edges
+    ctx.fillStyle = PAL.leafDk; ctx.beginPath(); ctx.ellipse(tX, cyc, rxc, ryc, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = PAL.leaf; ctx.beginPath(); ctx.ellipse(tX, cyc - TILE * 0.4, rxc * 0.9, ryc * 0.86, 0, 0, 7); ctx.fill();
+    // leaf speckle for texture
+    const inDome = (x, y) => { const dx = (x - tX) / rxc, dy = (y - cyc) / ryc; return dx * dx + dy * dy < 0.92; };
+    for (let y = -TILE; y < bottom; y += TILE * 1.15) for (let x = tX - rxc; x < tX + rxc; x += TILE * 1.15) {
+      if (!inDome(x, y)) continue;
+      const n = noise(Math.round(x), Math.round(y));
+      ctx.fillStyle = n > 0.35 ? PAL.leafLt : (n < -0.4 ? PAL.leafDk : PAL.leaf);
+      ctx.fillRect(x | 0, y | 0, 5, 5);
     }
+  }
+
+  // Big structural roots arcing from the trunk down the left & right edges — they
+  // frame the whole play area (decorative; the tappable roots are drawn by drawRoots).
+  function drawFramingRoots() {
+    const st = sim.state;
+    const tX = mx(st.trunkX), baseY = cy(st.groundY[st.trunkX]);
+    ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const side of [-1, 1]) {
+      const edgeX = side < 0 ? lw * 0.045 : lw * 0.955;
+      ctx.strokeStyle = 'rgba(74,51,32,0.42)'; ctx.lineWidth = TILE * 0.95;
+      ctx.beginPath();
+      ctx.moveTo(tX + side * TILE, baseY - TILE * 0.3);
+      ctx.bezierCurveTo(tX + side * lw * 0.20, baseY + TILE * 0.6, edgeX, cy(st.AIR_ROWS) + TILE * 2, edgeX, lh * 0.5);
+      ctx.lineTo(edgeX, lh * 0.98);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(96,69,42,0.45)'; ctx.lineWidth = TILE * 0.3; ctx.stroke();
+      // a secondary root branching back into the field
+      ctx.strokeStyle = 'rgba(74,51,32,0.26)'; ctx.lineWidth = TILE * 0.45;
+      ctx.beginPath(); ctx.moveTo(edgeX, lh * 0.52);
+      ctx.quadraticCurveTo(tX + side * lw * 0.26, lh * 0.78, tX + side * lw * 0.13, lh * 0.95);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   function drawPlanned() {
@@ -349,12 +405,13 @@ export function createRenderer(canvas, sim) {
     spawnParticles(dt); stepParticles(dt);
 
     drawSky();
+    drawCanopy();         // the great tree's canopy + trunk (behind the soil)
     drawSoil();
+    drawFramingRoots();   // big structural roots framing the play area
     drawHints();
     drawLogs();
     drawNodes();
-    drawRoots();
-    drawTrees();
+    drawRoots();          // tappable feeder roots descending into the field
     drawPlanned();
     drawHyphae();
     drawParticles();

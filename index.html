@@ -47,12 +47,19 @@
            border:1px solid #34507a; background:#1d2a40; color:#cfe2ff; }
   button:hover:not(:disabled) { background:#243651; }
   #controls { display:flex; gap:8px; flex-wrap:wrap; align-items:stretch; }
-  #controls button { padding:9px 14px; font-size:13px; min-height:44px; display:flex; align-items:center; gap:8px; }
-  .upg { background:#2c2440; border-color:#5a4a86; color:#ddd0ff; }
+  #controls button { padding:11px 16px; font-size:14px; min-height:44px; }
+  #upgrades { display:flex; gap:8px; flex-wrap:wrap; }
+  .upg { flex:1 1 200px; min-width:180px; display:flex; flex-direction:column; align-items:stretch;
+         text-align:left; gap:3px; padding:10px 12px; background:#241f33; border-color:#473a6b; color:#ddd0ff; }
+  .upg .urow { display:flex; justify-content:space-between; align-items:center; }
   .upg b { color:#fff; font-weight:600; }
-  .upg .pips { font-size:10px; color:#a99cd8; letter-spacing:1px; }
-  .upg .ucost { font-size:12px; color:#ffe6a0; font-variant-numeric: tabular-nums; }
-  button:disabled { opacity:.4; cursor:default; }
+  .upg .pips { font-size:11px; color:#a99cd8; letter-spacing:2px; }
+  .upg .unext { font-size:12px; color:#cdd6ea; }
+  .upg .udesc { font-size:11px; color:#8b93a7; line-height:1.35; }
+  .upg .ucost { font-size:13px; color:#ffe6a0; margin-top:2px; font-variant-numeric: tabular-nums; }
+  .upg.afford { background:#2c2440; border-color:#7a64b6; box-shadow:0 0 0 1px #6a55a655; }
+  .upg.afford .ucost { color:#ffd23f; }
+  button:disabled { opacity:.5; cursor:default; }
   .grp { font-size:10px; letter-spacing:1.5px; color:var(--muted); align-self:center; }
   #status { min-height:18px; font-size:13px; font-weight:600; color:#67718a; }
 </style>
@@ -67,6 +74,9 @@
       <div class="sep"></div>
       <span class="grp">HARVEST&nbsp;▸</span>
       <span class="res"><i class="chip" style="background:var(--nitrogen)"></i>Nitrogen <b id="nitrogen">0</b><span class="rate" id="nitrogenRate"></span></span>
+      <div class="sep"></div>
+      <span class="grp">TRADE&nbsp;▸</span>
+      <span class="res">1 🟢 → <b id="exchange">1.5</b> 🍬</span>
       <div class="sep"></div>
       <span class="stat">Size <b id="size">1</b></span>
       <span class="stat">Score <b id="peak">1</b></span>
@@ -89,11 +99,13 @@
       </div>
     </div>
     <div id="status"></div>
-    <div id="controls">
-      <button id="btnPause">⏸ Pause</button>
+    <div id="upgrades">
       <button id="btnForaging" class="upg"></button>
       <button id="btnMycelium" class="upg"></button>
       <button id="btnSymbiosis" class="upg"></button>
+    </div>
+    <div id="controls">
+      <button id="btnPause">⏸ Pause</button>
       <button id="btnNew2">↻ New run</button>
     </div>
     <div id="cursor"></div>

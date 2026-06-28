@@ -40,9 +40,12 @@ export const CONFIG = {
 
   // Tree exchange: nitrogen -> sugar. Hub trades best & instantly; distant roots are
   // weaker and ramp up over `warmup` seconds (the transport delay through the tree).
+  // `throughput` is the cap on nitrogen traded per second — deliberately low so that a
+  // well-colonized node banks raw nitrogen faster than one tree can trade it (the cue
+  // to tap another root or upgrade SYMBIOSIS). exchange = sugar returned per nitrogen.
   tree: {
-    hub:     { exchange: 1.5, throughput: 6, warmup: 0 },
-    distant: { exchange: 0.9, throughput: 4, warmup: 7 },
+    hub:     { exchange: 1.5, throughput: 2.5, warmup: 0 },
+    distant: { exchange: 0.9, throughput: 1.8, warmup: 7 },
   },
 
   reveal: { base: 3, hint: 2 },         // fog reveal radius (tiles) + hint band beyond
@@ -160,28 +163,30 @@ export function createSim(seed) {
     return t.layer === 'air' || !t.passable || t.node || t.root || t.log;
   };
 
-  // --- trees (exchange interfaces): a trunk on the surface + a root cluster below ---
+  // --- the great tree: ONE canopy above, many roots reaching down into the soil ---
+  // The whole map sits beneath a single tree. Each entry below is a ROOT INTERFACE where
+  // nitrogen is traded for sugar: the HUB root is the primary one straight under the core;
+  // the others are secondary roots spread across the upper soil (the "distant roots").
+  const trunkX = cx;                          // trunk descends right over the core
   const trees = [];
-  function makeTree(tx, hub) {
-    if (!inB(tx, 0)) return;
+  function makeRoot(tx, hub) {
+    tx = Math.max(1, Math.min(W - 2, tx));
     const surf = groundY[tx];
-    const tree = { id: trees.length, x: tx, y: surf, hub, roots: [], connected: false, warm: hub ? 1 : 0, tapped: 0, sugarOut: 0 };
-    trees.push(tree);
-    const len = hub ? ri(rng, 4, 5) : ri(rng, 3, 5);
+    const root = { id: trees.length, x: tx, y: surf, hub, roots: [], connected: false, warm: hub ? 1 : 0, tapped: 0, sugarOut: 0 };
+    trees.push(root);
+    const len = hub ? ri(rng, 4, 5) : ri(rng, 3, 6);
     let rx = tx;
     for (let k = 1; k <= len; k++) {
       const ry = surf + k;
       if (inB(rx, ry) && tileAt(rx, ry).passable && !occupied(rx, ry)) {
-        const t = tileAt(rx, ry); t.root = true; t.rootId = tree.id; tree.roots.push({ x: rx, y: ry });
+        const t = tileAt(rx, ry); t.root = true; t.rootId = root.id; root.roots.push({ x: rx, y: ry });
       }
-      if (rng() < 0.45) rx += ri(rng, -1, 1);
+      if (rng() < 0.5) rx += ri(rng, -1, 1);
     }
   }
-  // Hub tree sits over the core so sugar can flow as soon as nitrogen arrives.
-  makeTree(cx, true);
-  // Distant trees scattered across the surface.
-  const distantCols = [ri(rng, 5, 16), ri(rng, W - 16, W - 6), ri(rng, 20, 30) > cx ? ri(rng, cx + 12, W - 8) : ri(rng, 6, cx - 12)];
-  for (const dx of distantCols) if (Math.abs(dx - cx) > 8) makeTree(dx, false);
+  makeRoot(cx, true);                          // hub root by the core (instant, best rate)
+  for (const c of [Math.round(W * 0.14), Math.round(W * 0.86), cx < W / 2 ? Math.round(W * 0.72) : Math.round(W * 0.28)])
+    if (Math.abs(c - cx) > 7) makeRoot(c, false);   // secondary roots, spread wide
 
   // --- organic-matter nodes (nitrogen) — scattered, variable richness, fog-hidden ---
   const nodes = [];
@@ -255,7 +260,7 @@ export function createSim(seed) {
 
   // --- state ---
   const state = {
-    seed, W, H, AIR_ROWS: C.AIR_ROWS, groundY, tiles, nodes, trees, logs, core,
+    seed, W, H, AIR_ROWS: C.AIR_ROWS, groundY, tiles, nodes, trees, logs, core, trunkX,
     res: { ...C.start },
     upg: { foraging: 0, mycelium: 0, symbiosis: 0 },
     size: 1, peak: 1, time: 0,
@@ -264,6 +269,10 @@ export function createSim(seed) {
     growthActive: false, bottleneck: null,   // 'sugar' | 'water' | null
     starving: false, starveTimer: 0, coreStarveTimer: 0,
     income: { sugar: 0, water: 0, nitrogen: 0 },
+    harvest: 0,                               // gross nitrogen mined/sec (before trading)
+    trade: { nitrogen: 0, sugar: 0 },         // live nitrogen -> sugar conversion/sec
+    exchangeRate: CONFIG.tree.hub.exchange,   // best (hub) sugar returned per nitrogen
+    nitrogenFull: false,                      // pool capped while still over-harvesting
     fx: [],                                   // transient visual events (log bursts)
     over: false, result: null,
   };
@@ -476,6 +485,11 @@ export function createSim(seed) {
     state.income.nitrogen = (nGain - nSpent) / dt;
     state.income.sugar = sGain / dt - state.size * C.upkeep.sugar * upkeepMult();
     state.income.water = wGain / dt - state.size * C.upkeep.water * upkeepMult();
+    // Pipeline readouts for the HUD: what you mine, what trees trade, and the rate.
+    state.harvest = nGain / dt;
+    state.trade = { nitrogen: nSpent / dt, sugar: sGain / dt };
+    state.exchangeRate = C.tree.hub.exchange * exchangeMult();
+    state.nitrogenFull = state.res.nitrogen >= capFor('nitrogen') - 0.01 && nGain > nSpent + 1e-4;
 
     if (deficit) {
       state.starving = true; state.starveTimer += dt;

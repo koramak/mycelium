@@ -13,9 +13,18 @@ const STEP = 1 / 30;
 let renderer, paused = false, acc = 0, last = performance.now();
 
 const UPG = {
-  foraging:  { name: 'Foraging',  tiers: ['Faster extraction — nodes drain quicker per contact', 'Reveal radius — see further into the fog', 'Deep extraction — mine deep subsoil reserves'] },
-  mycelium:  { name: 'Mycelium',  tiers: ['Growth speed — extend faster', 'Thicker trunks — faster transport, bigger nitrogen buffer', 'Reduced upkeep — each tile costs less'] },
-  symbiosis: { name: 'Symbiosis', tiers: ['Conversion rate — more sugar per nitrogen', 'Tree-side transport — distant roots ramp up faster', 'Tree vitality — trees process more nitrogen'] },
+  foraging: { name: 'Foraging', tiers: [
+    { t: 'Faster extraction', d: 'Nitrogen drains +60% faster per contact' },
+    { t: 'Wider reveal',      d: 'Fog reveal radius +2 tiles' },
+    { t: 'Deep extraction',   d: 'Mine the locked deep-soil reserves' }] },
+  mycelium: { name: 'Mycelium', tiers: [
+    { t: 'Growth speed',   d: 'Tiles extend +50% faster' },
+    { t: 'Thicker trunks', d: 'Faster transport · +50% nitrogen buffer' },
+    { t: 'Reduced upkeep', d: 'Every tile costs −40% to maintain' }] },
+  symbiosis: { name: 'Symbiosis', tiers: [
+    { t: 'Better trade',  d: '+40% sugar returned per nitrogen' },
+    { t: 'Faster roots',  d: 'Distant roots ramp up ~2× faster' },
+    { t: 'Tree vitality', d: '+60% nitrogen trade capacity' }] },
 };
 
 const randSeed = () => (Math.random() * 2 ** 31) >>> 0;
@@ -46,13 +55,17 @@ function updateUpgrade(track) {
   const cost = ctx.sim.upgradeCost(track);
   const btn = $('btn' + track[0].toUpperCase() + track.slice(1));
   const pips = '●'.repeat(tier) + '○'.repeat(3 - tier);
-  if (cost === null) {
-    btn.innerHTML = `<b>${UPG[track].name}</b> <span class="pips">${pips}</span><span class="ucost">MAX</span>`;
-    btn.disabled = true; btn.title = 'All tiers purchased';
-  } else {
-    btn.innerHTML = `<b>${UPG[track].name}</b> <span class="pips">${pips}</span><span class="ucost">${cost}🍬</span>`;
-    btn.disabled = st.res.sugar < cost;
-    btn.title = 'Next — ' + UPG[track].tiers[tier];
+  const head = `<div class="urow"><b>${UPG[track].name}</b><span class="pips">${pips}</span></div>`;
+  if (cost === null) { // all three tiers bought — show what's been achieved
+    const last = UPG[track].tiers[2];
+    btn.innerHTML = head + `<div class="unext">✓ Fully upgraded</div><div class="udesc">${last.d}</div>`;
+    btn.disabled = true; btn.classList.remove('afford'); btn.title = 'All three tiers purchased';
+  } else { // show what the NEXT tier does + its price; advances after each purchase
+    const nx = UPG[track].tiers[tier];
+    btn.innerHTML = head + `<div class="unext">Next: ${nx.t}</div><div class="udesc">${nx.d}</div><div class="ucost">${cost} 🍬</div>`;
+    const afford = st.res.sugar >= cost;
+    btn.disabled = !afford; btn.classList.toggle('afford', afford);
+    btn.title = nx.d;
   }
 }
 
@@ -64,6 +77,7 @@ function updateHud() {
   setRate($('sugarRate'), st.income.sugar);
   setRate($('waterRate'), st.income.water);
   setRate($('nitrogenRate'), st.income.nitrogen);
+  $('exchange').textContent = st.exchangeRate.toFixed(1);
   $('size').textContent = st.size;
   $('peak').textContent = st.peak;
   $('time').textContent = fmtTime(st.time);
@@ -79,9 +93,10 @@ function updateHud() {
   else cur.textContent = '';
 
   const status = $('status');
-  if (!st.queue.length) { status.textContent = '◦ Idle — tap where you want to grow'; status.style.color = '#67718a'; }
-  else if (st.bottleneck === 'sugar') { status.textContent = '⚠ Stalled — need 🍬 Sugar (deliver nitrogen to a tree root)'; status.style.color = '#ffb24a'; }
+  if (st.bottleneck === 'sugar') { status.textContent = '⚠ Stalled — need 🍬 Sugar (deliver nitrogen to a tree root)'; status.style.color = '#ffb24a'; }
   else if (st.bottleneck === 'water') { status.textContent = '⚠ Stalled — need 💧 Water (grow deeper for wetter soil)'; status.style.color = '#ffb24a'; }
+  else if (st.nitrogenFull) { status.textContent = '🟢 Nitrogen overflowing — trade more: reach another tree root or upgrade Symbiosis'; status.style.color = '#9be86a'; }
+  else if (!st.queue.length) { status.textContent = '◦ Idle — tap where you want to grow'; status.style.color = '#67718a'; }
   else { status.textContent = '▸ Growing…'; status.style.color = '#7fe0a0'; }
 
   updateUpgrade('foraging'); updateUpgrade('mycelium'); updateUpgrade('symbiosis');
