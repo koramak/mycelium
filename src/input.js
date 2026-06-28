@@ -1,9 +1,8 @@
 // input.js — unified pointer input (mouse + touch). `ctx.sim` is read live so it
-// survives new runs. `ui` is shared with the renderer/HUD. `ui.mode` is 'grow' | 'retract'.
+// survives new runs. `ui` is shared with the renderer/HUD. Tap/drag = direct growth.
 
 export function attachInput(canvas, ctx, ui) {
   let dragging = false, lastKey = '';
-  if (!ui.mode) ui.mode = 'grow';
 
   function tileFromEvent(e) {
     const sim = ctx.sim, r = canvas.getBoundingClientRect();
@@ -13,11 +12,7 @@ export function attachInput(canvas, ctx, ui) {
     return { x, y };
   }
 
-  function apply(t) {
-    if (!t) return;
-    if (ui.mode === 'retract') ctx.sim.retract(t.x, t.y);
-    else ctx.sim.growToward(t.x, t.y);
-  }
+  function apply(t) { if (t) ctx.sim.growToward(t.x, t.y); }
 
   // Mouse-only hover preview (no hover on touch).
   function refreshHover(t) {

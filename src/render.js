@@ -1,14 +1,19 @@
 // render.js — draws sim state to a canvas. Read-only view of the sim.
+// Fog of war, organic-matter nodes (by richness), tree roots (hub/distant), buried
+// logs, and two-way resource flow (nitrogen inward to trees, sugar outward to the front).
 
 export const TILE = 15;
 
 const PAL = {
   skyTop: '#161d33', skyBot: '#39324d',
   surface: '#6b4a2f', topsoil: '#553a26', subsoil: '#412c1c', rock: '#393645',
-  boulder: '#2a2833', ash: '#221f1c',
-  sugar: '#e0a93f', mineral: '#bd6b22', water: '#3f82d6',
+  boulder: '#2a2833',
+  fog: '#0c0d12', fogEdge: '#13141c',
   hypha: '#eafff1', glow: 'rgba(150,255,205,0.10)', core: '#c4ffdd',
-  fireA: '#ff7a29', fireB: '#ffd24a',
+  nitro: '#7fde7a', sugar: '#f5c84a',
+  node: '#3a5a2e', nodeBright: '#9be86a', nodeDeep: '#48506a',
+  root: '#7a5a38', rootLive: '#f5c84a',
+  log: '#6b4a26', logGrain: '#8a5e30',
   ghost: 'rgba(170,255,215,0.20)',
   trunk: '#4a3320', leaf: '#3f7d4a', leafDk: '#2f5d38',
 };
@@ -32,6 +37,84 @@ export function createRenderer(canvas, sim) {
   const cx = x => x * TILE, cy = y => y * TILE;     // tile -> px (top-left)
   const mx = x => x * TILE + TILE / 2, my = y => y * TILE + TILE / 2; // center
 
+  // ---- resource-flow particles (cosmetic; walk the BFS dist gradient) ----
+  // Nitrogen flows DOWN the gradient (outer -> core/hub roots); sugar flows UP the
+  // gradient (core/hub -> the growth front). Frozen while paused (time doesn't advance).
+  let particles = [];
+  let lastT = sim.state.time;
+
+  const tileAt = (x, y) => (x >= 0 && y >= 0 && x < W && y < H) ? sim.state.tiles[y * W + x] : null;
+  function gradientNeighbor(x, y, dir) {
+    // dir -1: toward smaller dist (inward), +1: toward larger dist (outward)
+    const t = tileAt(x, y); if (!t) return null;
+    const opts = [];
+    for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]]) {
+      const n = tileAt(nx, ny);
+      if (n && n.hypha && ((dir < 0 && n.dist < t.dist) || (dir > 0 && n.dist > t.dist))) opts.push(n);
+    }
+    if (!opts.length) return null;
+    return opts[(Math.random() * opts.length) | 0];
+  }
+
+  function spawnParticles(dt) {
+    const st = sim.state;
+    if (dt <= 0 || particles.length > 90) return;
+    // nitrogen: spawn at actively-extracting node contact tiles, flow inward.
+    for (const n of st.nodes) {
+      if (n.rate <= 0.05) continue;
+      if (Math.random() < Math.min(0.9, n.rate * 0.25) * dt * 30 / 30) {
+        const c = n.tiles[(Math.random() * n.tiles.length) | 0];
+        // find a hypha contact tile to start from
+        let start = tileAt(c.x, c.y);
+        if (!start || !start.hypha) {
+          for (const [nx, ny] of [[c.x + 1, c.y], [c.x - 1, c.y], [c.x, c.y + 1], [c.x, c.y - 1]]) {
+            const t = tileAt(nx, ny); if (t && t.hypha) { start = t; break; }
+          }
+        }
+        if (start && start.hypha) particles.push({ kind: 'nitro', x: start.x, y: start.y, dir: -1, prog: 0, life: 6 });
+      }
+    }
+    // sugar: spawn at connected tree roots, flow outward to the front.
+    for (const tr of st.trees) {
+      if (!tr.connected || tr.sugarOut <= 0.05) continue;
+      if (Math.random() < Math.min(0.9, tr.sugarOut * 0.18) * dt) {
+        const r = tr.roots[(Math.random() * tr.roots.length) | 0];
+        let start = tileAt(r.x, r.y);
+        if (start && start.hypha) particles.push({ kind: 'sugar', x: r.x, y: r.y, dir: 1, prog: 0, life: 6 });
+        else particles.push({ kind: 'sugar', x: st.core.x, y: st.core.y, dir: 1, prog: 0, life: 6 });
+      }
+    }
+  }
+
+  function stepParticles(dt) {
+    const speed = 9; // tiles/sec
+    for (const p of particles) {
+      p.life -= dt;
+      p.prog += speed * dt;
+      while (p.prog >= 1) {
+        p.prog -= 1;
+        const nxt = gradientNeighbor(p.x, p.y, p.dir);
+        if (!nxt) { p.life = 0; break; }
+        p.px = p.x; p.py = p.y; p.x = nxt.x; p.y = nxt.y;
+      }
+    }
+    particles = particles.filter(p => p.life > 0 && tileAt(p.x, p.y) && tileAt(p.x, p.y).hypha);
+  }
+
+  function drawParticles() {
+    for (const p of particles) {
+      const fromX = p.px != null ? p.px : p.x, fromY = p.py != null ? p.py : p.y;
+      const px = mx(fromX) + (mx(p.x) - mx(fromX)) * p.prog;
+      const py = my(fromY) + (my(p.y) - my(fromY)) * p.prog;
+      ctx.fillStyle = p.kind === 'nitro' ? PAL.nitro : PAL.sugar;
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath(); ctx.arc(px, py, 2.4, 0, 7); ctx.fill();
+      ctx.globalAlpha = 0.22;
+      ctx.beginPath(); ctx.arc(px, py, 5, 0, 7); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   function drawSky() {
     const g = ctx.createLinearGradient(0, 0, 0, lh);
     g.addColorStop(0, PAL.skyTop); g.addColorStop(1, PAL.skyBot);
@@ -43,6 +126,12 @@ export function createRenderer(canvas, sim) {
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const t = st.tiles[y * W + x];
       if (t.layer === 'air') continue;
+      if (!t.revealed) {
+        // undiscovered soil — dark fog with faint texture
+        ctx.fillStyle = noise(x, y) > 0.55 ? PAL.fogEdge : PAL.fog;
+        ctx.fillRect(cx(x), cy(y), TILE, TILE);
+        continue;
+      }
       if (t.boulder) {
         ctx.fillStyle = PAL.boulder; ctx.fillRect(cx(x), cy(y), TILE, TILE);
         ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(cx(x) + 2, cy(y) + 2, 3, 3);
@@ -51,30 +140,91 @@ export function createRenderer(canvas, sim) {
       const base = LAYER_RGB[t.layer];
       ctx.fillStyle = shade(base, noise(x, y) * 7);
       ctx.fillRect(cx(x), cy(y), TILE, TILE);
-      if (t.ash) { ctx.fillStyle = 'rgba(20,16,14,0.72)'; ctx.fillRect(cx(x), cy(y), TILE, TILE); if (noise(x, y * 3) > 0.6) { ctx.fillStyle = 'rgba(255,110,40,0.5)'; ctx.fillRect(cx(x) + 6, cy(y) + 6, 2, 2); } }
+    }
+  }
+
+  // Subtle discoloration where a node sits just beyond the reveal radius — a hint.
+  function drawHints() {
+    const st = sim.state;
+    const pulse = 0.5 + 0.5 * Math.sin(st.time * 2);
+    for (const n of st.nodes) {
+      if (!n.hinted || n.revealed) continue;
+      for (const c of n.tiles) {
+        const t = st.tiles[c.y * W + c.x];
+        if (t.revealed) continue; // hint only shows on still-dark soil
+        ctx.fillStyle = `rgba(120,150,90,${0.05 + 0.06 * pulse})`;
+        ctx.fillRect(cx(c.x), cy(c.y), TILE, TILE);
+      }
     }
   }
 
   function drawNodes() {
     const st = sim.state;
     for (const n of st.nodes) {
+      if (!n.revealed) continue;
       const frac = n.reserve / n.maxReserve;
       const dead = n.reserve <= 0;
+      const locked = n.deep && st.upg.foraging < 3;
+      const rich = Math.min(1, n.maxReserve / 340);   // richness 0..1 (gusher = 1)
+      const active = n.rate > 0.05;
       for (const c of n.tiles) {
         const px = cx(c.x), py = cy(c.y);
-        if (n.kind === 'water') {
-          ctx.fillStyle = dead ? 'rgba(80,90,100,0.5)' : `rgba(63,130,214,${0.35 + 0.4 * frac})`;
-          ctx.fillRect(px, py, TILE, TILE);
-          ctx.fillStyle = dead ? 'rgba(110,120,130,0.4)' : 'rgba(150,200,255,0.5)';
-          ctx.fillRect(px, py, TILE, 3);
-        } else if (n.kind === 'sugar') {
-          ctx.fillStyle = dead ? '#5b5448' : PAL.sugar; ctx.fillRect(px + 4, py, TILE - 8, TILE);
-          ctx.fillStyle = dead ? '#6b6354' : '#f6d27a'; ctx.fillRect(px + 6, py, 2, TILE);
-        } else { // mineral log
-          ctx.fillStyle = dead ? '#544b40' : PAL.mineral; ctx.fillRect(px, py + 2, TILE, TILE - 4);
-          ctx.fillStyle = dead ? '#433c33' : '#8a4a16'; ctx.fillRect(px, py + 6, TILE, 2);
+        // organic clump
+        ctx.fillStyle = dead ? '#3a352c' : (locked ? PAL.nodeDeep : PAL.node);
+        ctx.fillRect(px + 1, py + 1, TILE - 2, TILE - 2);
+        ctx.fillStyle = dead ? '#2c281f' : 'rgba(0,0,0,0.25)';
+        if (noise(c.x, c.y) > 0) ctx.fillRect(px + 3, py + 5, 4, 3);
+      }
+      // nutrient glow — brighter & larger with richness, pulses while extracting
+      if (!dead && !locked) {
+        const center = n.tiles[(n.tiles.length / 2) | 0];
+        const gx = mx(center.x), gy = my(center.y);
+        const pulse = active ? (0.6 + 0.4 * Math.sin(st.time * 6)) : 0.5;
+        const rad = TILE * (0.6 + 0.9 * rich) * (0.85 + 0.25 * pulse) * (0.4 + 0.6 * frac);
+        const g = ctx.createRadialGradient(gx, gy, 1, gx, gy, rad);
+        g.addColorStop(0, `rgba(155,232,106,${(0.30 + 0.4 * rich) * (active ? 1 : 0.7)})`);
+        g.addColorStop(1, 'rgba(155,232,106,0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(gx, gy, rad, 0, 7); ctx.fill();
+      }
+      if (locked) { // padlock-ish marker: deep reserve awaiting FORAGING T3
+        const center = n.tiles[(n.tiles.length / 2) | 0];
+        ctx.fillStyle = 'rgba(180,190,220,0.5)';
+        ctx.fillRect(mx(center.x) - 2, my(center.y) - 2, 4, 4);
+      }
+    }
+  }
+
+  function drawRoots() {
+    const st = sim.state;
+    for (const tr of st.trees) {
+      for (const r of tr.roots) {
+        const t = st.tiles[r.y * W + r.x];
+        if (!t.revealed) continue;
+        const px = cx(r.x), py = cy(r.y);
+        ctx.fillStyle = PAL.root; ctx.fillRect(px + 5, py, TILE - 10, TILE);
+        ctx.fillStyle = '#5e4429'; ctx.fillRect(px + 6, py, 2, TILE);
+        if (tr.connected) { // gold exchange glow at a live interface
+          const gx = mx(r.x), gy = my(r.y);
+          const pulse = 0.5 + 0.5 * Math.sin(st.time * 5 + r.x);
+          const g = ctx.createRadialGradient(gx, gy, 1, gx, gy, TILE * 0.9);
+          g.addColorStop(0, `rgba(245,200,74,${0.22 + 0.18 * pulse})`);
+          g.addColorStop(1, 'rgba(245,200,74,0)');
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(gx, gy, TILE * 0.9, 0, 7); ctx.fill();
         }
-        if (n.tapped && !dead) { ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(px, py, TILE, TILE); }
+      }
+    }
+  }
+
+  function drawLogs() {
+    const st = sim.state;
+    for (const log of st.logs) {
+      if (log.consumed) continue;
+      for (const c of log.tiles) {
+        const t = st.tiles[c.y * W + c.x];
+        if (!t.revealed) continue;
+        const px = cx(c.x), py = cy(c.y);
+        ctx.fillStyle = PAL.log; ctx.fillRect(px, py + 2, TILE, TILE - 4);
+        ctx.fillStyle = PAL.logGrain; ctx.fillRect(px, py + 5, TILE, 1); ctx.fillRect(px, py + 9, TILE, 1);
       }
     }
   }
@@ -83,11 +233,17 @@ export function createRenderer(canvas, sim) {
     const st = sim.state;
     for (const tr of st.trees) {
       const bx = mx(tr.x), by = cy(tr.y);
-      ctx.fillStyle = PAL.trunk; ctx.fillRect(bx - 2, by - TILE * 2, 4, TILE * 2);
+      const scale = tr.hub ? 1.25 : 1;
+      ctx.fillStyle = PAL.trunk; ctx.fillRect(bx - 2 * scale, by - TILE * 2 * scale, 4 * scale, TILE * 2 * scale);
       for (let i = -3; i <= 3; i++) for (let j = -4; j <= 0; j++) {
         if (i * i + (j + 2) * (j + 2) > 11) continue;
         ctx.fillStyle = noise(tr.x + i, tr.y + j) > 0.2 ? PAL.leafDk : PAL.leaf;
-        ctx.fillRect(bx + i * TILE * 0.6 - TILE * 0.3, by - TILE * 2 + j * TILE * 0.7, TILE * 0.7, TILE * 0.7);
+        ctx.fillRect(bx + i * TILE * 0.6 * scale - TILE * 0.3, by - TILE * 2 * scale + j * TILE * 0.7, TILE * 0.7 * scale, TILE * 0.7 * scale);
+      }
+      if (tr.connected) { // a fed tree glows gold
+        const g = ctx.createRadialGradient(bx, by - TILE * 2, 2, bx, by - TILE * 2, TILE * 3);
+        g.addColorStop(0, 'rgba(245,200,74,0.10)'); g.addColorStop(1, 'rgba(245,200,74,0)');
+        ctx.fillStyle = g; ctx.fillRect(bx - TILE * 3, by - TILE * 5, TILE * 6, TILE * 5);
       }
     }
   }
@@ -96,7 +252,6 @@ export function createRenderer(canvas, sim) {
     const st = sim.state;
     ctx.fillStyle = PAL.ghost;
     for (const t of st.tiles) if (t.planned) ctx.fillRect(cx(t.x) + 5, cy(t.y) + 5, TILE - 10, TILE - 10);
-    // animated flow line along the growth queue — the trail visibly moving out
     const q = st.queue;
     if (q.length) {
       ctx.save();
@@ -119,6 +274,12 @@ export function createRenderer(canvas, sim) {
 
   function drawHyphae() {
     const st = sim.state;
+    // die-back warning: when starving, the farthest-out threads dim & flicker.
+    let maxDist = 0;
+    if (st.starving) for (const t of st.tiles) if (t.hypha && t.dist > maxDist) maxDist = t.dist;
+    const flicker = 0.5 + 0.5 * Math.sin(st.time * 14);
+    const dimAt = maxDist * 0.55;
+
     const edges = [];
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const t = st.tiles[y * W + x];
@@ -136,35 +297,33 @@ export function createRenderer(canvas, sim) {
     ctx.beginPath();
     for (const [x1, y1, x2, y2] of edges) { ctx.moveTo(mx(x1), my(y1)); ctx.lineTo(mx(x2), my(y2)); }
     ctx.stroke();
-    // tips + nodes
-    ctx.fillStyle = PAL.hypha;
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { if (st.tiles[y * W + x].hypha) { ctx.beginPath(); ctx.arc(mx(x), my(y), 2, 0, 7); ctx.fill(); } }
-    // core — grows with core level, pulses faster while actively feeding
-    const lvl = st.coreLevel || 1;
+    // tiles + die-back dimming on the threatened fringe
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const t = st.tiles[y * W + x];
+      if (!t.hypha) continue;
+      let a = 1;
+      if (st.starving && t.dist > dimAt) a = 0.25 + 0.45 * flicker; // threatened fringe flickers
+      ctx.fillStyle = `rgba(234,255,241,${a})`;
+      ctx.beginPath(); ctx.arc(mx(x), my(y), 2, 0, 7); ctx.fill();
+    }
+    // core
     const speed = st.growthActive ? 7 : 4;
     const pulse = 0.5 + 0.5 * Math.sin(st.time * speed);
-    const base = TILE * (0.5 + 0.13 * (lvl - 1));
+    const base = TILE * 0.5;
     ctx.fillStyle = `rgba(196,255,221,${0.22 + 0.22 * pulse})`; ctx.beginPath(); ctx.arc(mx(st.core.x), my(st.core.y), base * (1.3 + 0.25 * pulse), 0, 7); ctx.fill();
     ctx.fillStyle = PAL.core; ctx.beginPath(); ctx.arc(mx(st.core.x), my(st.core.y), base * 0.62, 0, 7); ctx.fill();
   }
 
-  function drawFire() {
-    const st = sim.state, F = st.fire;
+  function drawBursts() {
+    const st = sim.state;
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
     for (const f of st.fx) {
+      if (f.kind !== 'burst') continue;
       const a = f.t / f.max;
-      const flick = 0.6 + 0.4 * Math.sin(st.time * 30 + f.x * 1.3 + f.y);
-      ctx.fillStyle = `rgba(255,${120 + 100 * a | 0},40,${0.5 * a})`;
-      const h = TILE * (0.7 + 0.6 * flick) * a;
-      ctx.fillRect(cx(f.x) + 2, cy(f.y) + TILE - h, TILE - 4, h);
-      ctx.fillStyle = `rgba(255,220,90,${0.5 * a})`;
-      ctx.fillRect(cx(f.x) + 5, cy(f.y) + TILE - h * 0.6, TILE - 10, h * 0.6);
-    }
-    if (F.state === 'active') {
-      const sx = F.sweepX * TILE;
-      const g = ctx.createLinearGradient(sx - 40, 0, sx + 10, 0);
-      g.addColorStop(0, 'rgba(255,120,40,0)'); g.addColorStop(1, 'rgba(255,150,50,0.35)');
-      ctx.fillStyle = g; ctx.fillRect(sx - 40, 0, 50, lh);
+      const r = TILE * (1.2 - a) * 1.1;
+      const g = ctx.createRadialGradient(mx(f.x), my(f.y), 1, mx(f.x), my(f.y), r + 1);
+      g.addColorStop(0, `rgba(180,255,210,${0.5 * a})`); g.addColorStop(1, 'rgba(180,255,210,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(mx(f.x), my(f.y), r + 1, 0, 7); ctx.fill();
     }
     ctx.restore();
   }
@@ -185,13 +344,21 @@ export function createRenderer(canvas, sim) {
   }
 
   function draw(ui) {
+    const st = sim.state;
+    const dt = Math.max(0, Math.min(0.1, st.time - lastT)); lastT = st.time;
+    spawnParticles(dt); stepParticles(dt);
+
     drawSky();
     drawSoil();
+    drawHints();
+    drawLogs();
     drawNodes();
+    drawRoots();
     drawTrees();
     drawPlanned();
     drawHyphae();
-    drawFire();
+    drawParticles();
+    drawBursts();
     drawHover(ui);
   }
 

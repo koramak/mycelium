@@ -7,10 +7,16 @@ import { attachInput } from './input.js';
 const canvas = document.getElementById('c');
 const $ = id => document.getElementById(id);
 const ctx = { sim: null };
-const ui = { hoverTile: null, hoverPath: null, hoverCost: null, reachable: false, mode: 'grow' };
+const ui = { hoverTile: null, hoverPath: null, hoverCost: null, reachable: false };
 
 const STEP = 1 / 30;
 let renderer, paused = false, acc = 0, last = performance.now();
+
+const UPG = {
+  foraging:  { name: 'Foraging',  tiers: ['Faster extraction — nodes drain quicker per contact', 'Reveal radius — see further into the fog', 'Deep extraction — mine deep subsoil reserves'] },
+  mycelium:  { name: 'Mycelium',  tiers: ['Growth speed — extend faster', 'Thicker trunks — faster transport, bigger nitrogen buffer', 'Reduced upkeep — each tile costs less'] },
+  symbiosis: { name: 'Symbiosis', tiers: ['Conversion rate — more sugar per nitrogen', 'Tree-side transport — distant roots ramp up faster', 'Tree vitality — trees process more nitrogen'] },
+};
 
 const randSeed = () => (Math.random() * 2 ** 31) >>> 0;
 function urlSeed() {
@@ -30,27 +36,41 @@ const fmtTime = s => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padSt
 
 function setRate(el, v) {
   if (v > 0.05) { el.textContent = '▲' + v.toFixed(1); el.style.color = '#7fe0a0'; }
-  else if (v < -0.05) { el.textContent = '▼' + v.toFixed(1); el.style.color = '#e08585'; }
+  else if (v < -0.05) { el.textContent = '▼' + Math.abs(v).toFixed(1); el.style.color = '#e08585'; }
   else { el.textContent = '◦'; el.style.color = '#67718a'; }
+}
+
+function updateUpgrade(track) {
+  const st = ctx.sim.state;
+  const tier = st.upg[track];
+  const cost = ctx.sim.upgradeCost(track);
+  const btn = $('btn' + track[0].toUpperCase() + track.slice(1));
+  const pips = '●'.repeat(tier) + '○'.repeat(3 - tier);
+  if (cost === null) {
+    btn.innerHTML = `<b>${UPG[track].name}</b> <span class="pips">${pips}</span><span class="ucost">MAX</span>`;
+    btn.disabled = true; btn.title = 'All tiers purchased';
+  } else {
+    btn.innerHTML = `<b>${UPG[track].name}</b> <span class="pips">${pips}</span><span class="ucost">${cost}🍬</span>`;
+    btn.disabled = st.res.sugar < cost;
+    btn.title = 'Next — ' + UPG[track].tiers[tier];
+  }
 }
 
 function updateHud() {
   const st = ctx.sim.state;
   $('sugar').textContent = Math.floor(st.res.sugar);
-  $('mineral').textContent = Math.floor(st.res.mineral);
   $('water').textContent = Math.floor(st.res.water);
+  $('nitrogen').textContent = Math.floor(st.res.nitrogen);
   setRate($('sugarRate'), st.income.sugar);
-  setRate($('mineralRate'), st.income.mineral);
   setRate($('waterRate'), st.income.water);
+  setRate($('nitrogenRate'), st.income.nitrogen);
   $('size').textContent = st.size;
   $('peak').textContent = st.peak;
   $('time').textContent = fmtTime(st.time);
   $('seed').textContent = st.seed;
 
-  const F = st.fire, b = $('banner');
-  if (F.state === 'warning') { b.textContent = '🔥 WILDFIRE INCOMING — ' + Math.ceil(F.warnLeft) + 's — pull hyphae off the surface!'; b.className = 'warn'; }
-  else if (F.state === 'active') { b.textContent = '🔥 WILDFIRE SWEEPING!'; b.className = 'active'; }
-  else if (st.starving) { b.textContent = '⚠ STARVING — network dying back'; b.className = 'starve'; }
+  const b = $('banner');
+  if (st.starving) { b.textContent = '⚠ STARVING — network dying back from the edges'; b.className = 'starve'; }
   else b.className = 'hidden';
 
   const cur = $('cursor');
@@ -58,27 +78,19 @@ function updateHud() {
   else if (ui.hoverTile && !ui.reachable) cur.textContent = 'unreachable';
   else cur.textContent = '';
 
-  $('coreLvl').textContent = 'Lv ' + st.coreLevel;
   const status = $('status');
   if (!st.queue.length) { status.textContent = '◦ Idle — tap where you want to grow'; status.style.color = '#67718a'; }
-  else if (st.bottleneck === 'sugar') { status.textContent = '⚠ Stalled — need 🍬 Sugar (reach a tree root)'; status.style.color = '#ffb24a'; }
-  else if (st.bottleneck === 'water') { status.textContent = '⚠ Stalled — need 💧 Water (reach a pocket)'; status.style.color = '#ffb24a'; }
+  else if (st.bottleneck === 'sugar') { status.textContent = '⚠ Stalled — need 🍬 Sugar (deliver nitrogen to a tree root)'; status.style.color = '#ffb24a'; }
+  else if (st.bottleneck === 'water') { status.textContent = '⚠ Stalled — need 💧 Water (grow deeper for wetter soil)'; status.style.color = '#ffb24a'; }
   else { status.textContent = '▸ Growing…'; status.style.color = '#7fe0a0'; }
-  const uc = ctx.sim.upgradeCost();
-  const ub = $('btnUpgrade');
-  ub.textContent = '⬆ Grow Core (' + uc + '⛰)';
-  ub.disabled = st.res.mineral < uc;
 
+  updateUpgrade('foraging'); updateUpgrade('mycelium'); updateUpgrade('symbiosis');
   $('btnPause').textContent = paused ? '▶ Resume' : '⏸ Pause';
-  const retract = ui.mode === 'retract';
-  $('btnMode').textContent = retract ? '✂ Retracting' : '✚ Growing';
-  $('btnMode').classList.toggle('retract', retract);
 }
 
 function showOverlay(r) {
   const ov = $('overlay'); if (!ov.classList.contains('hidden')) return;
-  const cause = r.cause === 'burned' ? 'Your core burned in the wildfire.' : 'Your network starved and collapsed.';
-  $('ovBody').innerHTML = cause + '<br><br>Peak network size: <b>' + r.peak + '</b><br>Core level: <b>' + r.coreLevel +
+  $('ovBody').innerHTML = 'Your network starved and collapsed.<br><br>Peak network size: <b>' + r.peak +
     '</b><br>Survived: <b>' + fmtTime(r.time) + '</b><br>Seed: <b>' + r.seed + '</b>';
   ov.classList.remove('hidden');
 }
@@ -103,8 +115,9 @@ $('btnNew').addEventListener('click', () => newRun(randSeed()));
 $('btnReplay').addEventListener('click', () => newRun(ctx.sim.state.seed));
 $('btnNew2').addEventListener('click', () => newRun(randSeed()));
 $('btnPause').addEventListener('click', () => { if (!ctx.sim.state.over) paused = !paused; });
-$('btnMode').addEventListener('click', () => { ui.mode = ui.mode === 'grow' ? 'retract' : 'grow'; });
-$('btnUpgrade').addEventListener('click', () => ctx.sim.upgradeCore());
+$('btnForaging').addEventListener('click', () => ctx.sim.buyUpgrade('foraging'));
+$('btnMycelium').addEventListener('click', () => ctx.sim.buyUpgrade('mycelium'));
+$('btnSymbiosis').addEventListener('click', () => ctx.sim.buyUpgrade('symbiosis'));
 
 newRun(urlSeed() ?? randSeed());
 attachInput(canvas, ctx, ui);
