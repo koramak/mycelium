@@ -22,7 +22,7 @@ export const CONFIG = {
   AIR_ROWS: 5,
   start: { sugar: 42, water: 38, nitrogen: 0 },
 
-  cap: { sugar: 130, water: 110, nitrogen: 120 },
+  cap: { sugar: 300, water: 110, nitrogen: 150 }, // sugar must clear the 200 tier-3 cost
 
   // Growth costs SUGAR + WATER together, scaled by tile difficulty (deeper = pricier).
   cost: { sugar: 1.0, water: 1.0 },
@@ -45,8 +45,8 @@ export const CONFIG = {
   // is the real constraint. `exchange` (sugar per nitrogen) is high so sugar still flows
   // even though each root trades slowly.
   tree: {
-    hub:     { exchange: 2.2, throughput: 1.2, warmup: 0 },
-    distant: { exchange: 1.3, throughput: 0.9, warmup: 7 },
+    hub:     { exchange: 2.4, throughput: 2.0, warmup: 0 },
+    distant: { exchange: 1.5, throughput: 1.4, warmup: 7 },
   },
 
   reveal: { base: 3, hint: 2 },         // fog reveal radius (tiles) + hint band beyond
