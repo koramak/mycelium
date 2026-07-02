@@ -22,13 +22,13 @@ export const CONFIG = {
   AIR_ROWS: 5,
   start: { sugar: 42, water: 38, nitrogen: 0 },
 
-  cap: { sugar: 300, water: 110, nitrogen: 150 }, // sugar must clear the 200 tier-3 cost
+  cap: { sugar: 300, water: 110, nitrogen: 200 }, // sugar clears the 200 tier-3 cost; N banks with runway
 
   // Growth costs SUGAR + WATER together, scaled by tile difficulty (deeper = pricier).
   cost: { sugar: 1.0, water: 1.0 },
   costMul: { surface: 0.9, topsoil: 1.0, subsoil: 1.5, rock: 2.4 },
 
-  upkeep: { sugar: 0.02, water: 0.02 }, // per hypha tile, per second
+  upkeep: { sugar: 0.025, water: 0.02 }, // per hypha tile, per second (sugar is the pressure)
 
   growthBase: 7,                        // tiles/sec the frontier advances
 
@@ -38,24 +38,30 @@ export const CONFIG = {
   // Nitrogen extraction: per contacting tile (on-node or orthogonally adjacent), per sec.
   nitrogenPerContact: 0.9,
 
-  // Tree exchange: nitrogen -> sugar. Hub trades best & instantly; distant roots are
-  // weaker and ramp up over `warmup` seconds (the transport delay through the tree).
-  // `throughput` (nitrogen traded/sec) is deliberately LOW so you out-mine it and raw
-  // nitrogen visibly STOCKPILES while you forage — trade capacity (more roots / SYMBIOSIS)
-  // is the real constraint. `exchange` (sugar per nitrogen) is high so sugar still flows
-  // even though each root trades slowly.
+  // Tree exchange: nitrogen -> sugar. The HUB (by the core) trades for QUALITY — the best
+  // rate, instantly. DISTANT roots trade for VOLUME — a bit less per unit, but each one you
+  // reach adds real throughput so you can cash a nitrogen stockpile faster. Which root is
+  // best is a routing decision: sugar-per-nitrogen falls with TRANSPORT DISTANCE (fungal
+  // hops from your actively-mining nodes to that root). A distant root sitting right by a
+  // rich node can out-earn hauling everything back to a far-away hub. Thicker trunks
+  // (MYCELIUM T2) and faster tree transport (SYMBIOSIS T2) both flatten that distance
+  // penalty. `throughput` stays modest so a surrounded gusher out-mines a single root and
+  // nitrogen visibly BANKS — expanding trade capacity is the reward loop.
   tree: {
-    hub:     { exchange: 2.4, throughput: 2.0, warmup: 0 },
-    distant: { exchange: 1.5, throughput: 1.4, warmup: 7 },
+    hub:     { exchange: 2.6, throughput: 2.4, warmup: 0 },
+    distant: { exchange: 1.7, throughput: 2.2, warmup: 6 },
   },
+  // Sugar-per-nitrogen at a root is divided by (1 + hopCost * hops-to-nearest-active-node).
+  transport: { hopCost: 0.05, thickMul: 0.6, treeMul: 0.5 },
 
   reveal: { base: 3, hint: 2 },         // fog reveal radius (tiles) + hint band beyond
 
-  // Upgrade costs in SUGAR, per tier (sequential within a track).
+  // Upgrade costs in SUGAR, per tier (sequential within a track). Snappy first buy, then
+  // escalating; the tier-3 price sits under the sugar cap so you can bank for it.
   upgrades: {
-    foraging:  [45, 100, 200],
-    mycelium:  [45, 100, 200],
-    symbiosis: [45, 100, 200],
+    foraging:  [40, 95, 190],
+    mycelium:  [40, 95, 190],
+    symbiosis: [40, 95, 190],
   },
 
   starveInterval: 0.7,
@@ -320,6 +326,7 @@ export function createSim(seed) {
   // so sharing avoids allocating two W*H arrays on every hover/grow.
   const distBuf = new Float64Array(W * H);
   const prevBuf = new Int32Array(W * H);
+  const hopBuf = new Int32Array(W * H);    // fungal-hop distance from active mining sites
   let pendingRecompute = false;            // a log burst happened; resync the network
 
   // Multi-source Dijkstra from the whole network to (tx,ty). Returns ordered tiles to
@@ -439,6 +446,7 @@ export function createSim(seed) {
     // 1) NITROGEN extraction — rate scales with how many tiles contact each node.
     const nBefore = state.res.nitrogen;
     let nGain = 0;
+    const activeSrc = [];                    // hypha tiles currently pulling nitrogen (BFS roots)
     for (const n of state.nodes) {
       n.contacts = 0; n.rate = 0;
       if (n.reserve <= 0) continue;
@@ -454,31 +462,74 @@ export function createSim(seed) {
       const rate = C.nitrogenPerContact * n.contacts * extractMult();
       const y = Math.min(rate * dt, n.reserve);
       n.reserve -= y; n.rate = y / dt; nGain += y;
+      if (n.rate > 0) for (const i of seen) activeSrc.push(i);   // these tiles feed the routing BFS
     }
+
+    // Fungal-hop distance field: how many network steps from the nearest ACTIVE mining site
+    // to every hypha tile. A root's distance in this field is the transport cost of hauling
+    // freshly-mined nitrogen to it — the heart of the hub-vs-distant-root routing decision.
+    let hopField = null;
+    if (activeSrc.length) {
+      hopBuf.fill(-1);
+      const q = []; let head = 0;
+      for (const i of activeSrc) if (hopBuf[i] < 0) { hopBuf[i] = 0; q.push(i); }
+      while (head < q.length) {
+        const i = q[head++], x = i % W, y = (i / W) | 0, d = hopBuf[i];
+        for (const [nx, ny] of neigh(x, y)) {
+          if (!inB(nx, ny)) continue;
+          const ni = idx(nx, ny);
+          if (tileAt(nx, ny).hypha && hopBuf[ni] < 0) { hopBuf[ni] = d + 1; q.push(ni); }
+        }
+      }
+      hopField = hopBuf;
+    }
+    // Hops from a root's interface to the nearest active mining site (0 if nothing is mining).
+    const rootHops = (tr) => {
+      if (!hopField) return 0;
+      let best = Infinity;
+      for (const r of tr.roots) {
+        const here = idx(r.x, r.y);
+        if (tileAt(r.x, r.y).hypha && hopField[here] >= 0) best = Math.min(best, hopField[here]);
+        for (const [nx, ny] of neigh(r.x, r.y)) if (inB(nx, ny) && tileAt(nx, ny).hypha && hopField[idx(nx, ny)] >= 0) best = Math.min(best, hopField[idx(nx, ny)]);
+      }
+      return best === Infinity ? 0 : best;
+    };
+    // Per-hop rate penalty, flattened by thicker trunks (MYCELIUM T2) and faster tree
+    // transport (SYMBIOSIS T2) — the two upgrades the design says shrink distance cost.
+    const effHopCost = C.transport.hopCost
+      * (state.upg.mycelium  >= 2 ? C.transport.thickMul : 1)
+      * (state.upg.symbiosis >= 2 ? C.transport.treeMul  : 1);
     const capN = capFor('nitrogen');
     const wasted = Math.max(0, nBefore + nGain - capN); // overflow discarded this tick
     addRes('nitrogen', nGain);
 
-    // 2) TREE EXCHANGE — connected trees pull nitrogen from the pool and return sugar.
-    //    Hub trades first (best rate); distant roots mop up surplus once warmed up.
+    // 2) TREE EXCHANGE — connected roots pull nitrogen from the pool and return sugar.
+    //    Each root's effective rate = base rate / (1 + hopCost·hops-to-active-mining). The
+    //    hub wins when you mine near the core; a distant root wins when it sits closer to
+    //    where you're actually digging. Best effective rate trades first, up to throughput.
     let sGain = 0, nSpent = 0, bestEx = 0;
-    const baseEx = tr => (tr.hub ? C.tree.hub : C.tree.distant).exchange;
-    const sorted = [...state.trees].sort((a, b) => baseEx(b) - baseEx(a)); // best exchange first (hub leads)
-    for (const tr of sorted) {
+    const active = [];
+    for (const tr of state.trees) {
       tr.connected = tr.roots.some(r => { const t = tileAt(r.x, r.y); return t.hypha || adjToNet(r.x, r.y); });
       tr.sugarOut = 0; tr.tapped = 0;
       const base = tr.hub ? C.tree.hub : C.tree.distant;
       // warmup ramps 0->1 while connected (instant for the hub), resets when severed.
       if (tr.connected) tr.warm = base.warmup <= 0 ? 1 : Math.min(1, tr.warm + warmupRate(base.warmup) * dt);
-      else { tr.warm = base.warmup <= 0 ? 1 : 0; continue; }
-      const exchange = base.exchange * exchangeMult();
-      if (exchange > bestEx) bestEx = exchange; // best rate among connected roots (for HUD)
+      else { tr.warm = base.warmup <= 0 ? 1 : 0; tr.hops = 0; tr.exchange = base.exchange * exchangeMult(); continue; }
+      tr.hops = rootHops(tr);
+      tr.exchange = base.exchange * exchangeMult() / (1 + effHopCost * tr.hops);
+      if (tr.exchange > bestEx) bestEx = tr.exchange;   // best effective rate (for HUD)
+      active.push(tr);
+    }
+    active.sort((a, b) => b.exchange - a.exchange);      // route nitrogen to the best rate first
+    for (const tr of active) {
+      const base = tr.hub ? C.tree.hub : C.tree.distant;
       const through = base.throughput * throughputMult() * tr.warm;
       const take = Math.min(through * dt, state.res.nitrogen);
       if (take <= 0) continue;
       state.res.nitrogen -= take; nSpent += take;
-      const sugar = take * exchange; sGain += sugar;
-      tr.sugarOut = sugar / dt; tr.tapped = take / dt; tr.exchange = exchange;
+      const sugar = take * tr.exchange; sGain += sugar;
+      tr.sugarOut = sugar / dt; tr.tapped = take / dt;
     }
     addRes('sugar', sGain);
 

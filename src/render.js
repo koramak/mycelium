@@ -5,18 +5,19 @@
 export const TILE = 15;
 
 const PAL = {
-  skyTop: '#161d33', skyBot: '#39324d',
+  skyTop: '#1b2647', skyMid: '#2c2f52', skyBot: '#3a3350',
+  sun: '#ffe6a8',
   surface: '#6b4a2f', topsoil: '#553a26', subsoil: '#412c1c', rock: '#393645',
   boulder: '#2a2833',
-  fog: '#0c0d12', fogEdge: '#13141c',
+  fog: '#0a0b10', fogEdge: '#12131c',
   hypha: '#eafff1', glow: 'rgba(150,255,205,0.10)', core: '#c4ffdd',
   nitro: '#6ee86e', sugar: '#ffd23f',           // green nitrogen · yellow sugar
   node: '#3a5a2e', nodeBright: '#9be86a', nodeDeep: '#48506a',
   root: '#7a5a38', rootLive: '#ffd23f',
   log: '#6b4a26', logGrain: '#8a5e30',
   ghost: 'rgba(170,255,215,0.20)',
-  bark: '#4a3320', barkLt: '#5e4329', barkDk: '#35251433',
-  leaf: '#3f7d4a', leafDk: '#2f5d38', leafLt: '#56995e',
+  bark: '#4a3320', barkLt: '#6a4c2e', barkDk: '#2c1d10',
+  leaf: '#3f7d4a', leafDk: '#274d30', leafLt: '#6fb56a', leafHi: '#9fd98a',
 };
 
 function hexRgb(h) { return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; }
@@ -123,10 +124,44 @@ export function createRenderer(canvas, sim) {
     ctx.restore(); ctx.globalAlpha = 1;
   }
 
+  // ---- ambient spore motes (cosmetic; drift slowly for a sense of living air) ----
+  let motes = null;
+  function ensureMotes() {
+    if (motes) return;
+    motes = [];
+    for (let i = 0; i < 34; i++) motes.push({ x: Math.random() * lw, y: Math.random() * lh, vx: (Math.random() - 0.5) * 4, vy: -3 - Math.random() * 5, r: 0.6 + Math.random() * 1.3, ph: Math.random() * 7 });
+  }
+  function drawMotes(dt) {
+    ensureMotes();
+    const st = sim.state;
+    ctx.save();
+    for (const m of motes) {
+      m.x += (m.vx + Math.sin(st.time * 0.7 + m.ph) * 3) * dt;
+      m.y += m.vy * dt;
+      if (m.y < -4) { m.y = lh + 4; m.x = Math.random() * lw; }
+      if (m.x < -4) m.x = lw + 4; else if (m.x > lw + 4) m.x = -4;
+      const tx = (m.x / TILE) | 0, ty = (m.y / TILE) | 0;
+      const t = tileAt(tx, ty);
+      const lit = !t || t.layer === 'air' || t.revealed;   // hide inside undiscovered soil
+      if (!lit) continue;
+      const tw = 0.35 + 0.35 * Math.sin(st.time * 1.5 + m.ph);
+      ctx.globalAlpha = 0.18 + 0.22 * tw;
+      ctx.fillStyle = '#dfe6d8';
+      ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, 7); ctx.fill();
+    }
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
   function drawSky() {
     const g = ctx.createLinearGradient(0, 0, 0, lh);
-    g.addColorStop(0, PAL.skyTop); g.addColorStop(1, PAL.skyBot);
+    g.addColorStop(0, PAL.skyTop); g.addColorStop(0.55, PAL.skyMid); g.addColorStop(1, PAL.skyBot);
     ctx.fillStyle = g; ctx.fillRect(0, 0, lw, lh);
+    // warm sun glow filtering through the canopy, centered over the trunk
+    const st = sim.state, sx = mx(st.trunkX), sy = lh * 0.12;
+    const sun = ctx.createRadialGradient(sx, sy, 4, sx, sy, lw * 0.5);
+    sun.addColorStop(0, 'rgba(255,230,168,0.28)'); sun.addColorStop(0.5, 'rgba(255,220,150,0.07)');
+    sun.addColorStop(1, 'rgba(255,220,150,0)');
+    ctx.fillStyle = sun; ctx.fillRect(0, 0, lw, lh * 0.5);
   }
 
   function drawSoil() {
@@ -135,19 +170,37 @@ export function createRenderer(canvas, sim) {
       const t = st.tiles[y * W + x];
       if (t.layer === 'air') continue;
       if (!t.revealed) {
-        // undiscovered soil — dark fog with faint texture
-        ctx.fillStyle = noise(x, y) > 0.55 ? PAL.fogEdge : PAL.fog;
+        // undiscovered soil — dark fog with faint texture, warming very slightly with depth
+        const n = noise(x, y);
+        ctx.fillStyle = n > 0.55 ? PAL.fogEdge : PAL.fog;
         ctx.fillRect(cx(x), cy(y), TILE, TILE);
         continue;
       }
       if (t.boulder) {
         ctx.fillStyle = PAL.boulder; ctx.fillRect(cx(x), cy(y), TILE, TILE);
         ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(cx(x) + 2, cy(y) + 2, 3, 3);
+        ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(cx(x) + TILE - 5, cy(y) + TILE - 5, 3, 3);
         continue;
       }
+      // depth-graded base: deeper soil reads darker & cooler so the strata separate
+      const depth = (y - st.AIR_ROWS) / (H - st.AIR_ROWS);
       const base = LAYER_RGB[t.layer];
-      ctx.fillStyle = shade(base, noise(x, y) * 7);
+      ctx.fillStyle = shade(base, noise(x, y) * 8 - depth * 14);
       ctx.fillRect(cx(x), cy(y), TILE, TILE);
+      // scattered grain / pebbles for grit
+      const n2 = noise(x * 3 + 11, y * 3 + 7);
+      if (n2 > 0.7) { ctx.fillStyle = shade(base, 16); ctx.fillRect(cx(x) + 4, cy(y) + 6, 2, 2); }
+      else if (n2 < -0.78) { ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fillRect(cx(x) + 8, cy(y) + 4, 3, 2); }
+    }
+    // soft edge glow where excavated (revealed) soil meets the dark unknown
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const t = st.tiles[y * W + x];
+      if (t.layer === 'air' || t.revealed) continue;
+      let nearLit = false;
+      for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]]) {
+        const nt = tileAt(nx, ny); if (nt && nt.revealed && nt.layer !== 'air') { nearLit = true; break; }
+      }
+      if (nearLit) { ctx.fillStyle = 'rgba(120,110,90,0.10)'; ctx.fillRect(cx(x), cy(y), TILE, TILE); }
     }
   }
 
@@ -232,7 +285,20 @@ export function createRenderer(canvas, sim) {
           ctx.fillStyle = g; ctx.beginPath(); ctx.arc(gx, gy, TILE * 1.1, 0, 7); ctx.fill();
         }
       }
+      // Live effective exchange rate at this interface — the routing feedback. Brighter =
+      // better rate right now; it drops as you mine far from this root.
+      if (tr.connected && tr.exchange != null) {
+        const tip = tr.roots[tr.roots.length - 1];
+        const lx = mx(tip.x), ly = my(tip.y) + TILE * 0.9;
+        const best = tr.exchange >= (st.exchangeRate - 0.01);
+        ctx.font = '700 10px ui-monospace, Menlo, monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const label = tr.exchange.toFixed(1) + '×';
+        ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(6,8,12,0.85)'; ctx.strokeText(label, lx, ly);
+        ctx.fillStyle = best ? '#ffe06a' : 'rgba(210,180,120,0.85)'; ctx.fillText(label, lx, ly);
+      }
     }
+    ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
   }
 
   function drawLogs() {
@@ -257,6 +323,23 @@ export function createRenderer(canvas, sim) {
     const baseY = cy(st.groundY[st.trunkX]);
     let minG = lh; for (let x = 0; x < W; x++) minG = Math.min(minG, cy(st.groundY[x]));
     const bottom = minG - 4, cyc = bottom * 0.22, ryc = bottom - cyc, rxc = lw * 0.6;
+    const sway = Math.sin(st.time * 0.6) * 3;   // gentle breeze
+
+    // soft god-rays spilling out of the canopy into the sky band above the soil
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 4; i++) {
+      const rx = tX + (i - 1.5) * lw * 0.2 + sway;
+      const spread = i - 1.5, footY = bottom + TILE * 4;
+      const g = ctx.createLinearGradient(rx, cyc, rx + spread * 30, footY);
+      g.addColorStop(0, 'rgba(255,231,170,0.07)'); g.addColorStop(1, 'rgba(255,231,170,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(rx - 3, cyc); ctx.lineTo(rx + 3, cyc);
+      ctx.lineTo(rx + spread * 30 + 70, footY);
+      ctx.lineTo(rx + spread * 30 - 70, footY);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
 
     // trunk (behind the canopy) — thick, tapering, planted into the ground
     const topW = TILE * 1.2, botW = TILE * 2.6;
@@ -265,41 +348,88 @@ export function createRenderer(canvas, sim) {
     ctx.moveTo(tX - topW / 2, 0); ctx.lineTo(tX + topW / 2, 0);
     ctx.lineTo(tX + botW / 2, baseY); ctx.lineTo(tX - botW / 2, baseY);
     ctx.closePath(); ctx.fill();
+    // bark striations + a sunlit edge
+    ctx.strokeStyle = PAL.barkDk; ctx.lineWidth = 1;
+    for (let k = -1; k <= 1; k++) { ctx.beginPath(); ctx.moveTo(tX + k * 5, 0); ctx.lineTo(tX + k * 8, baseY); ctx.stroke(); }
     ctx.fillStyle = PAL.barkLt; ctx.fillRect(tX - topW / 2 + 1, 0, 3, baseY);
 
-    // canopy mass — big lumpy dome, overflowing the top & side edges
-    ctx.fillStyle = PAL.leafDk; ctx.beginPath(); ctx.ellipse(tX, cyc, rxc, ryc, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = PAL.leaf; ctx.beginPath(); ctx.ellipse(tX, cyc - TILE * 0.4, rxc * 0.9, ryc * 0.86, 0, 0, 7); ctx.fill();
-    // leaf speckle for texture
-    const inDome = (x, y) => { const dx = (x - tX) / rxc, dy = (y - cyc) / ryc; return dx * dx + dy * dy < 0.92; };
-    for (let y = -TILE; y < bottom; y += TILE * 1.15) for (let x = tX - rxc; x < tX + rxc; x += TILE * 1.15) {
+    // canopy mass — layered lumpy crown with a vertical light gradient (lit top, shaded belly)
+    const grad = ctx.createLinearGradient(0, cyc - ryc, 0, bottom);
+    grad.addColorStop(0, PAL.leafLt); grad.addColorStop(0.5, PAL.leaf); grad.addColorStop(1, PAL.leafDk);
+    ctx.fillStyle = PAL.leafDk; ctx.beginPath(); ctx.ellipse(tX + sway, cyc, rxc, ryc, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.ellipse(tX + sway, cyc - TILE * 0.4, rxc * 0.92, ryc * 0.88, 0, 0, 7); ctx.fill();
+    // rolling foliage — big overlapping crown lobes across the top, each softly shaded
+    // (lit dome, shadowed belly) so the canopy reads as a mass of leaves seen from below.
+    const N = 26;
+    for (let i = 0; i < N; i++) {
+      const a = (i / (N - 1)) * Math.PI - Math.PI;            // sweep the upper arc
+      const bx = tX + sway + Math.cos(a) * rxc * 0.9;
+      const by = cyc + Math.sin(a) * ryc * 0.78;
+      const rr = TILE * (2.3 + 2.0 * (0.5 + 0.5 * noise(i * 7, 3)));
+      const lg = ctx.createRadialGradient(bx, by - rr * 0.4, rr * 0.1, bx, by, rr);
+      const hi = i % 4 === 0 ? PAL.leafHi : PAL.leafLt;
+      lg.addColorStop(0, hi); lg.addColorStop(0.6, PAL.leaf); lg.addColorStop(1, PAL.leafDk);
+      ctx.fillStyle = lg;
+      ctx.beginPath(); ctx.arc(bx, by, rr, 0, 7); ctx.fill();
+    }
+    // dappled leaf speckle for texture
+    const inDome = (x, y) => { const dx = (x - tX - sway) / rxc, dy = (y - cyc) / ryc; return dx * dx + dy * dy < 0.94; };
+    for (let y = -TILE; y < bottom; y += TILE * 0.95) for (let x = tX - rxc; x < tX + rxc; x += TILE * 0.95) {
       if (!inDome(x, y)) continue;
       const n = noise(Math.round(x), Math.round(y));
-      ctx.fillStyle = n > 0.35 ? PAL.leafLt : (n < -0.4 ? PAL.leafDk : PAL.leaf);
-      ctx.fillRect(x | 0, y | 0, 5, 5);
+      const lit = (y - (cyc - ryc)) / (bottom - (cyc - ryc));  // 0 top .. 1 bottom
+      ctx.fillStyle = n > 0.5 ? PAL.leafHi : (n > 0.15 ? PAL.leafLt : (n < -0.45 ? PAL.leafDk : PAL.leaf));
+      ctx.globalAlpha = 0.5 + 0.5 * (1 - lit);
+      ctx.fillRect((x + sway) | 0, y | 0, 5, 5);
     }
+    ctx.globalAlpha = 1;
   }
 
   // Big structural roots arcing from the trunk down the left & right edges — they
   // frame the whole play area (decorative; the tappable roots are drawn by drawRoots).
+  // Stroke a polyline whose width tapers from wStart (first point) to wEnd (last).
+  function taperStroke(pts, wStart, wEnd, style) {
+    ctx.strokeStyle = style; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (let i = 0; i < pts.length - 1; i++) {
+      const f = i / (pts.length - 1);
+      ctx.lineWidth = wStart + (wEnd - wStart) * f;
+      ctx.beginPath(); ctx.moveTo(pts[i][0], pts[i][1]); ctx.lineTo(pts[i + 1][0], pts[i + 1][1]); ctx.stroke();
+    }
+  }
+  function cubic(p0, p1, p2, p3, n) {
+    const out = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n, u = 1 - t;
+      const a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+      out.push([a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0], a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1]]);
+    }
+    return out;
+  }
+
   function drawFramingRoots() {
     const st = sim.state;
     const tX = mx(st.trunkX), baseY = cy(st.groundY[st.trunkX]);
-    ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.save();
     for (const side of [-1, 1]) {
       const edgeX = side < 0 ? lw * 0.045 : lw * 0.955;
-      ctx.strokeStyle = 'rgba(74,51,32,0.42)'; ctx.lineWidth = TILE * 0.95;
-      ctx.beginPath();
-      ctx.moveTo(tX + side * TILE, baseY - TILE * 0.3);
-      ctx.bezierCurveTo(tX + side * lw * 0.20, baseY + TILE * 0.6, edgeX, cy(st.AIR_ROWS) + TILE * 2, edgeX, lh * 0.5);
-      ctx.lineTo(edgeX, lh * 0.98);
-      ctx.stroke();
-      ctx.strokeStyle = 'rgba(96,69,42,0.45)'; ctx.lineWidth = TILE * 0.3; ctx.stroke();
-      // a secondary root branching back into the field
-      ctx.strokeStyle = 'rgba(74,51,32,0.26)'; ctx.lineWidth = TILE * 0.45;
-      ctx.beginPath(); ctx.moveTo(edgeX, lh * 0.52);
-      ctx.quadraticCurveTo(tX + side * lw * 0.26, lh * 0.78, tX + side * lw * 0.13, lh * 0.95);
-      ctx.stroke();
+      const pts = cubic(
+        [tX + side * TILE, baseY - TILE * 0.3],
+        [tX + side * lw * 0.20, baseY + TILE * 0.6],
+        [edgeX, cy(st.AIR_ROWS) + TILE * 2],
+        [edgeX, lh * 0.5], 22);
+      pts.push([edgeX, lh * 0.98]);
+      // thick at the trunk, whittling to a thread at the tip
+      taperStroke(pts, TILE * 1.5, TILE * 0.18, 'rgba(58,40,25,0.5)');
+      taperStroke(pts, TILE * 0.7, TILE * 0.1, 'rgba(96,69,42,0.4)');
+      ctx.strokeStyle = 'rgba(140,105,66,0.22)'; ctx.lineWidth = 1.5;   // sunlit hairline
+      ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (const p of pts) ctx.lineTo(p[0], p[1]); ctx.stroke();
+      // little rootlets peeling inward off the main root
+      for (const seg of [0.42, 0.66]) {
+        const bi = Math.floor(seg * (pts.length - 1)), base = pts[bi];
+        const branch = cubic(base, [base[0] - side * lw * 0.06, base[1] + TILE * 2],
+          [base[0] - side * lw * 0.12, base[1] + TILE * 4], [base[0] - side * lw * 0.16, base[1] + TILE * 6], 8);
+        taperStroke(branch, TILE * 0.4, TILE * 0.08, 'rgba(74,51,32,0.3)');
+      }
     }
     ctx.restore();
   }
@@ -416,6 +546,7 @@ export function createRenderer(canvas, sim) {
     drawHyphae();
     drawParticles();
     drawBursts();
+    drawMotes(dt);
     drawHover(ui);
   }
 
