@@ -73,6 +73,11 @@ export const CONFIG = {
   starveInterval: 0.7,
   coreGrace: 3.0,
   dieBackFrac: 0.05,
+
+  // FRUITING — the level's WIN. A bed of mushroom spots along the surface; each becomes
+  // pourable once your network runs beneath it. Clicking a cap banks `pour` sugar into it
+  // (irreversible — spend-vs-grow is the tension). Fill all of them and the level blooms.
+  fruit: { count: 5, need: 60, pour: 12, reachX: 2, reachDepth: 3 },
 };
 
 // Organic-matter node richness tiers. size = tile footprint radius hint; reserve = N units.
@@ -270,6 +275,19 @@ export function createSim(seed) {
     }
   }
 
+  // --- fruiting spots: a bed of mushrooms along the surface (the level's win) ---
+  // One spot per equal slice of the map, jittered, kept off the trunk. Visible from the
+  // start — they ARE the goal — but pourable only once the network runs beneath them.
+  const fruits = [];
+  for (let i = 0; i < C.fruit.count; i++) {
+    const lo = 2 + Math.floor((W - 4) * i / C.fruit.count);
+    const hi = 1 + Math.floor((W - 4) * (i + 1) / C.fruit.count);
+    let fx = ri(rng, lo, Math.max(lo, hi));
+    if (Math.abs(fx - trunkX) < 3) fx = trunkX + (fx < trunkX ? -3 : 3); // keep off the trunk
+    fx = Math.max(1, Math.min(W - 2, fx));
+    fruits.push({ id: i, x: fx, banked: 0, need: C.fruit.need, reachable: false, mature: false });
+  }
+
   // --- light the core ---
   const ct = tileAt(cx, cy); ct.boulder = false; ct.passable = true; ct.hypha = true; ct.dist = 0;
   ct.node = false; ct.nodeId = -1; ct.root = false; ct.rootId = -1; ct.log = false; ct.logId = -1;
@@ -278,6 +296,7 @@ export function createSim(seed) {
   const reserveTotal = nodes.reduce((s, n) => s + n.reserve, 0);
   const state = {
     seed, W, H, AIR_ROWS: C.AIR_ROWS, groundY, tiles, nodes, trees, logs, core, trunkX,
+    fruits, bloomed: 0,                       // surface mushrooms — fill them all to WIN
     reserveTotal, reserveLeft: reserveTotal,  // nitrogen still buried, map-wide (the run's clock)
     reserveLocked: nodes.reduce((s, n) => s + (n.deep ? n.reserve : 0), 0), // deep share, locked at start
     res: { ...C.start },
@@ -627,13 +646,51 @@ export function createSim(seed) {
     }
   }
 
+  // A mushroom is pourable while living hyphae run beneath its patch of surface.
+  function fruitStep() {
+    for (const f of state.fruits) {
+      if (f.mature) { f.reachable = true; continue; }
+      const gy = groundY[f.x];
+      let near = false;
+      for (let dx = -C.fruit.reachX; dx <= C.fruit.reachX && !near; dx++)
+        for (let dy = 0; dy <= C.fruit.reachDepth; dy++)
+          if (inB(f.x + dx, gy + dy) && tileAt(f.x + dx, gy + dy).hypha) { near = true; break; }
+      f.reachable = near;
+    }
+  }
+
+  // Cap hitbox: the air tiles the mushroom occupies (soil clicks still mean "grow").
+  function fruitAt(x, y) {
+    for (const f of state.fruits) {
+      const gy = groundY[f.x];
+      if (Math.abs(x - f.x) <= 1 && y < gy && y >= gy - 3) return f;
+    }
+    return null;
+  }
+
+  // Bank sugar into a surface mushroom. Irreversible. Fill every spot to win the level.
+  function pourSugar(id) {
+    const f = state.fruits[id];
+    if (!f || f.mature || !f.reachable || state.over) return false;
+    const amt = Math.min(C.fruit.pour, f.need - f.banked, state.res.sugar);
+    if (amt < 1) return false;                // nothing meaningful to pour
+    state.res.sugar -= amt; f.banked += amt;
+    state.fx.push({ kind: 'pour', x: f.x, y: groundY[f.x] - 1, t: 0.7, max: 0.7 });
+    if (f.banked >= f.need) {
+      f.mature = true; state.bloomed++;
+      state.fx.push({ kind: 'bloom', x: f.x, y: groundY[f.x] - 1, t: 1.6, max: 1.6 });
+      if (state.bloomed >= state.fruits.length) gameOver('bloomed');
+    }
+    return true;
+  }
+
   function gameOver(cause) {
     if (state.over) return;
     state.over = true;
     // Starving with the map mined dry is the EARNED ending — you spent the whole world.
     if (cause === 'starved' && state.reserveLeft < 1) cause = 'exhausted';
     state.result = { peak: state.peak, time: state.time, seed, cause, size: state.size,
-                     nitrogenLeft: Math.round(state.reserveLeft) };
+                     nitrogenLeft: Math.round(state.reserveLeft), bloomed: state.bloomed };
   }
 
   function decayFx(dt) { for (let i = state.fx.length - 1; i >= 0; i--) { state.fx[i].t -= dt; if (state.fx[i].t <= 0) state.fx.splice(i, 1); } }
@@ -648,12 +705,13 @@ export function createSim(seed) {
     growStep(dt);
     if (pendingRecompute) { recomputeNetwork(); pendingRecompute = false; } // resync after a log burst
     economyStep(dt);
+    fruitStep();
     fogStep();
     decayFx(dt);
   }
 
   return {
     state, tick, growToward, pathTo, pathResourceCost, resourceCost, tileAt,
-    buyUpgrade, upgradeCost, upgradeTracks, CONFIG: C,
+    buyUpgrade, upgradeCost, upgradeTracks, pourSugar, fruitAt, CONFIG: C,
   };
 }

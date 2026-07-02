@@ -17,8 +17,11 @@ export function attachInput(canvas, ctx, ui) {
   // Mouse-only hover preview (no hover on touch).
   function refreshHover(t) {
     const sim = ctx.sim;
+    ui.hoverFruit = null;
     if (!t) { ui.hoverTile = ui.hoverPath = ui.hoverCost = null; ui.reachable = false; return; }
     ui.hoverTile = t;
+    const f = sim.fruitAt(t.x, t.y);
+    if (f) { ui.hoverFruit = f; ui.hoverPath = null; ui.hoverCost = null; ui.reachable = true; return; }
     const path = sim.pathTo(t.x, t.y);
     if (!path || !path.length) { ui.hoverPath = null; ui.hoverCost = null; ui.reachable = !!path; return; }
     ui.hoverPath = path; ui.reachable = true;
@@ -31,6 +34,8 @@ export function attachInput(canvas, ctx, ui) {
   canvas.addEventListener('pointerdown', e => {
     e.preventDefault();
     const t = tileFromEvent(e); if (!t) return;
+    const f = ctx.sim.fruitAt(t.x, t.y);
+    if (f) { ctx.sim.pourSugar(f.id); return; }   // click a mushroom cap = pour sugar into it
     dragging = true; lastKey = t.x + ',' + t.y;
     try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
     apply(t);

@@ -460,6 +460,60 @@ export function createRenderer(canvas, sim) {
     ctx.restore();
   }
 
+  // The bed of surface mushrooms — the level's win condition, and its mascot. Each grows
+  // through stages as sugar is banked: nub → button → toadstool → mature fly agaric
+  // (spots, sway, drifting spores). Reachable-but-unfinished caps pulse a soft gold ring.
+  function drawMushrooms() {
+    const st = sim.state;
+    for (const f of st.fruits) {
+      const gy = st.groundY[f.x];
+      const groundTop = cy(gy);
+      const s = f.mature ? 1 : f.banked / f.need;      // growth stage 0..1
+      const sway = f.mature ? Math.sin(st.time * 1.3 + f.id * 1.7) * 1.5 : 0;
+      const capX = mx(f.x) + sway;
+      const stemH = TILE * (0.3 + 1.0 * s);
+      const stemW = 3 + 2.5 * s;
+      const capR = TILE * (0.26 + 0.42 * s);
+      const capY = groundTop - stemH;
+      const dim = !f.reachable && !f.mature;
+      ctx.save();
+      if (dim) ctx.globalAlpha = 0.5;                  // silhouette: a goal you can't feed yet
+      // stem
+      ctx.fillStyle = '#e6dcc4';
+      ctx.fillRect(mx(f.x) - stemW / 2, capY, stemW, stemH);
+      ctx.fillStyle = 'rgba(0,0,0,0.15)';
+      ctx.fillRect(mx(f.x) + stemW / 2 - 1.5, capY, 1.5, stemH);
+      // cap (fly agaric red, brighter when mature)
+      ctx.fillStyle = f.mature ? '#e05a4e' : '#c04a40';
+      ctx.beginPath(); ctx.arc(capX, capY, capR, Math.PI, 0); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(255,235,220,0.9)';         // white spots
+      if (s > 0.3) { ctx.fillRect(capX - capR * 0.5, capY - capR * 0.5, 2, 2); ctx.fillRect(capX + capR * 0.3, capY - capR * 0.25, 2, 2); }
+      if (s > 0.7) ctx.fillRect(capX - capR * 0.1, capY - capR * 0.75, 2, 2);
+      ctx.fillStyle = '#f2e3d0';                       // gills line under the cap
+      ctx.fillRect(capX - capR * 0.85, capY - 1, capR * 1.7, 1.5);
+      ctx.restore();
+
+      if (f.mature) {
+        // warm glow + spores drifting up on the breeze
+        const g = ctx.createRadialGradient(capX, capY - 2, 1, capX, capY - 2, TILE * 1.5);
+        g.addColorStop(0, 'rgba(255,170,160,0.20)'); g.addColorStop(1, 'rgba(255,170,160,0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(capX, capY - 2, TILE * 1.5, 0, 7); ctx.fill();
+        for (let k = 0; k < 3; k++) {
+          const ph = (st.time * 5 + k * 11 + f.id * 7) % 26;
+          const sx = capX + Math.sin(st.time * 0.9 + k * 2.1 + f.id) * 6;
+          const a = Math.max(0, 1 - ph / 26);
+          ctx.fillStyle = `rgba(255,235,240,${0.6 * a})`;
+          ctx.beginPath(); ctx.arc(sx, capY - 4 - ph, 1.3, 0, 7); ctx.fill();
+        }
+      } else if (f.reachable) {
+        // pourable: gentle gold pulse says "click me"
+        const pulse = 0.5 + 0.5 * Math.sin(st.time * 3 + f.id);
+        ctx.strokeStyle = `rgba(255,210,63,${0.25 + 0.3 * pulse})`; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(capX, capY - 1, capR + 3.5 + pulse * 1.5, 0, 7); ctx.stroke();
+      }
+    }
+  }
+
   function drawPlanned() {
     const st = sim.state;
     ctx.fillStyle = PAL.ghost;
@@ -536,6 +590,19 @@ export function createRenderer(canvas, sim) {
         const g = ctx.createRadialGradient(mx(f.x), my(f.y), 1, mx(f.x), my(f.y), r + 1);
         g.addColorStop(0, `rgba(180,255,210,${0.5 * a})`); g.addColorStop(1, 'rgba(180,255,210,0)');
         ctx.fillStyle = g; ctx.beginPath(); ctx.arc(mx(f.x), my(f.y), r + 1, 0, 7); ctx.fill();
+      } else if (f.kind === 'pour') {
+        // golden motes rising into the cap — sugar becoming mushroom
+        const rise = (1 - a) * TILE * 1.3;
+        ctx.fillStyle = `rgba(255,210,63,${0.85 * a})`;
+        for (let k = 0; k < 3; k++) {
+          const ox = (k - 1) * 4 + Math.sin((1 - a) * 6 + k * 2) * 2;
+          ctx.beginPath(); ctx.arc(mx(f.x) + ox, my(f.y) - rise + k * 2.5, 1.6, 0, 7); ctx.fill();
+        }
+      } else if (f.kind === 'bloom') {
+        // a mushroom just matured — warm celebratory ring
+        const r = TILE * (0.5 + (1 - a) * 2.8);
+        ctx.strokeStyle = `rgba(255,170,180,${0.7 * a})`; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(mx(f.x), my(f.y), r, 0, 7); ctx.stroke();
       } else if (f.kind === 'deplete') {
         // a dull ring sighing outward — this node just gave its last nitrogen
         const r = TILE * (0.4 + (1 - a) * 2.4);
@@ -576,6 +643,7 @@ export function createRenderer(canvas, sim) {
     drawLogs();
     drawNodes();
     drawRoots();          // tappable feeder roots descending into the field
+    drawMushrooms();      // the surface bed — the level's win condition
     drawPlanned();
     drawHyphae();
     drawParticles();

@@ -7,7 +7,7 @@ import { attachInput } from './input.js';
 const canvas = document.getElementById('c');
 const $ = id => document.getElementById(id);
 const ctx = { sim: null };
-const ui = { hoverTile: null, hoverPath: null, hoverCost: null, reachable: false };
+const ui = { hoverTile: null, hoverPath: null, hoverCost: null, hoverFruit: null, reachable: false };
 
 const STEP = 1 / 30;
 let renderer, paused = false, acc = 0, last = performance.now();
@@ -36,7 +36,7 @@ function urlSeed() {
 function newRun(seed) {
   ctx.sim = createSim(seed);
   renderer = createRenderer(canvas, ctx.sim);
-  ui.hoverTile = ui.hoverPath = ui.hoverCost = null; ui.reachable = false;
+  ui.hoverTile = ui.hoverPath = ui.hoverCost = ui.hoverFruit = null; ui.reachable = false;
   paused = false; acc = 0;
   $('overlay').classList.add('hidden');
 }
@@ -85,6 +85,7 @@ function updateHud() {
   const soil = $('soil');
   soil.innerHTML = accPct + '%' + (lockPct > 0 ? ' <span style="color:#8a95c8">+' + lockPct + '% deep</span>' : '');
   soil.style.color = accPct > 50 ? '#7fe0a0' : accPct > 20 ? '#ffb24a' : '#e08585';
+  $('bloom').textContent = st.bloomed + '/' + st.fruits.length;
   $('size').textContent = st.size;
   $('peak').textContent = st.peak;
   $('time').textContent = fmtTime(st.time);
@@ -95,7 +96,13 @@ function updateHud() {
   else b.className = 'hidden';
 
   const cur = $('cursor');
-  if (ui.hoverCost) { const c = ui.hoverCost; cur.textContent = c.tiles + ' tiles → 🍬' + Math.ceil(c.sugar) + '  💧' + Math.ceil(c.water); }
+  if (ui.hoverFruit) {
+    const f = ui.hoverFruit;
+    cur.textContent = f.mature ? '🍄 mature — spores on the wind'
+      : f.reachable ? '🍄 ' + Math.floor(f.banked) + '/' + f.need + ' 🍬 banked — click to pour ' + ctx.sim.CONFIG.fruit.pour
+      : '🍄 grow your network beneath this spot to fruit it';
+  }
+  else if (ui.hoverCost) { const c = ui.hoverCost; cur.textContent = c.tiles + ' tiles → 🍬' + Math.ceil(c.sugar) + '  💧' + Math.ceil(c.water); }
   else if (ui.hoverTile && !ui.reachable) cur.textContent = 'unreachable';
   else cur.textContent = '';
 
@@ -114,17 +121,20 @@ function updateHud() {
 
 function showOverlay(r) {
   const ov = $('overlay'); if (!ov.classList.contains('hidden')) return;
+  const bloomed = r.cause === 'bloomed';
   const exhausted = r.cause === 'exhausted';
   const title = $('ovTitle');
-  title.textContent = exhausted ? 'The Soil Is Spent' : 'Network Collapsed';
-  title.style.color = exhausted ? '#ffd23f' : '#ff8e6a';
-  const lede = exhausted
+  title.textContent = bloomed ? '🍄 First Bloom!' : exhausted ? 'The Soil Is Spent' : 'Network Collapsed';
+  title.style.color = bloomed ? '#9be86a' : exhausted ? '#ffd23f' : '#ff8e6a';
+  const lede = bloomed
+    ? 'Every mushroom fruited — your spores ride the wind to the next forest. <b>Level complete.</b>'
+    : exhausted
     ? 'You drew every scrap of nitrogen this earth held. Nothing left to trade — the run is complete.'
-    : 'Your network starved and collapsed.';
-  const buried = !exhausted && r.nitrogenLeft > 0
+    : 'Your network starved and collapsed' + (r.bloomed > 0 ? ' with ' + r.bloomed + ' mushroom' + (r.bloomed > 1 ? 's' : '') + ' fruited.' : '.');
+  const buried = !bloomed && !exhausted && r.nitrogenLeft > 0
     ? '<br>Nitrogen left buried: <b>' + r.nitrogenLeft + '</b>' : '';
   $('ovBody').innerHTML = lede + '<br><br>Peak network size: <b>' + r.peak +
-    '</b><br>Survived: <b>' + fmtTime(r.time) + '</b>' + buried + '<br>Seed: <b>' + r.seed + '</b>';
+    '</b><br>' + (bloomed ? 'Bloomed in' : 'Survived') + ': <b>' + fmtTime(r.time) + '</b>' + buried + '<br>Seed: <b>' + r.seed + '</b>';
   ov.classList.remove('hidden');
 }
 
