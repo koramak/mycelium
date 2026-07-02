@@ -16,7 +16,7 @@ const UPG = {
   foraging: { name: 'Foraging', tiers: [
     { t: 'Faster extraction', d: 'Nitrogen drains +60% faster per contact' },
     { t: 'Wider reveal',      d: 'Fog reveal radius +2 tiles' },
-    { t: 'Deep extraction',   d: 'Mine the locked deep-soil reserves' }] },
+    { t: 'Deep extraction',   d: 'Unlock the deep reserves — dense matter mines +50% faster' }] },
   mycelium: { name: 'Mycelium', tiers: [
     { t: 'Growth speed',   d: 'Tiles extend +50% faster' },
     { t: 'Thicker trunks', d: 'Faster transport · +50% nitrogen buffer' },
@@ -78,6 +78,13 @@ function updateHud() {
   setRate($('waterRate'), st.income.water);
   setRate($('nitrogenRate'), st.income.nitrogen);
   $('exchange').textContent = st.exchangeRate.toFixed(1);
+  // Soil gauge: what you can mine NOW, plus the still-locked deep share as a teaser.
+  const accessible = Math.max(0, st.reserveLeft - st.reserveLocked);
+  const accPct = st.reserveTotal > 0 ? Math.max(0, Math.round(100 * accessible / st.reserveTotal)) : 0;
+  const lockPct = st.reserveTotal > 0 ? Math.round(100 * st.reserveLocked / st.reserveTotal) : 0;
+  const soil = $('soil');
+  soil.innerHTML = accPct + '%' + (lockPct > 0 ? ' <span style="color:#8a95c8">+' + lockPct + '% deep</span>' : '');
+  soil.style.color = accPct > 50 ? '#7fe0a0' : accPct > 20 ? '#ffb24a' : '#e08585';
   $('size').textContent = st.size;
   $('peak').textContent = st.peak;
   $('time').textContent = fmtTime(st.time);
@@ -95,6 +102,8 @@ function updateHud() {
   const status = $('status');
   if (st.bottleneck === 'sugar') { status.textContent = '⚠ Stalled — need 🍬 Sugar (deliver nitrogen to a tree root)'; status.style.color = '#ffb24a'; }
   else if (st.bottleneck === 'water') { status.textContent = '⚠ Stalled — need 💧 Water (grow deeper for wetter soil)'; status.style.color = '#ffb24a'; }
+  else if (st.reserveLeft < 1) { status.textContent = '⏳ Soil spent — every node mined dry. The network lives on what it banked.'; status.style.color = '#ffb24a'; }
+  else if (st.reserveLeft - st.reserveLocked < 1 && st.reserveLocked >= 1) { status.textContent = '⛏ Shallow soil spent — the rich reserves lie DEEP. Unlock Foraging T3.'; status.style.color = '#8a95c8'; }
   else if (st.nitrogenFull) { status.textContent = '🟢 Nitrogen overflowing — trade more: reach another tree root or upgrade Symbiosis'; status.style.color = '#9be86a'; }
   else if (!st.queue.length) { status.textContent = '◦ Idle — tap where you want to grow'; status.style.color = '#67718a'; }
   else { status.textContent = '▸ Growing…'; status.style.color = '#7fe0a0'; }
@@ -105,8 +114,17 @@ function updateHud() {
 
 function showOverlay(r) {
   const ov = $('overlay'); if (!ov.classList.contains('hidden')) return;
-  $('ovBody').innerHTML = 'Your network starved and collapsed.<br><br>Peak network size: <b>' + r.peak +
-    '</b><br>Survived: <b>' + fmtTime(r.time) + '</b><br>Seed: <b>' + r.seed + '</b>';
+  const exhausted = r.cause === 'exhausted';
+  const title = $('ovTitle');
+  title.textContent = exhausted ? 'The Soil Is Spent' : 'Network Collapsed';
+  title.style.color = exhausted ? '#ffd23f' : '#ff8e6a';
+  const lede = exhausted
+    ? 'You drew every scrap of nitrogen this earth held. Nothing left to trade — the run is complete.'
+    : 'Your network starved and collapsed.';
+  const buried = !exhausted && r.nitrogenLeft > 0
+    ? '<br>Nitrogen left buried: <b>' + r.nitrogenLeft + '</b>' : '';
+  $('ovBody').innerHTML = lede + '<br><br>Peak network size: <b>' + r.peak +
+    '</b><br>Survived: <b>' + fmtTime(r.time) + '</b>' + buried + '<br>Seed: <b>' + r.seed + '</b>';
   ov.classList.remove('hidden');
 }
 

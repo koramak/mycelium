@@ -37,6 +37,10 @@ export const CONFIG = {
 
   // Nitrogen extraction: per contacting tile (on-node or orthogonally adjacent), per sec.
   nitrogenPerContact: 0.9,
+  // Deep nodes are ancient, dense organic matter: they mine faster per contact. Together
+  // with the motherlode tier this makes FORAGING T3 a power spike — the deep rush — not
+  // just an unlock. Over half the map's nitrogen sits below the T3 line.
+  deepBonus: 1.5,
 
   // Tree exchange: nitrogen -> sugar. The HUB (by the core) trades for QUALITY — the best
   // rate, instantly. DISTANT roots trade for VOLUME — a bit less per unit, but each one you
@@ -49,10 +53,12 @@ export const CONFIG = {
   // nitrogen visibly BANKS — expanding trade capacity is the reward loop.
   tree: {
     hub:     { exchange: 2.6, throughput: 2.4, warmup: 0 },
-    distant: { exchange: 1.7, throughput: 2.2, warmup: 6 },
+    distant: { exchange: 1.9, throughput: 2.2, warmup: 6 },
   },
   // Sugar-per-nitrogen at a root is divided by (1 + hopCost * hops-to-nearest-active-node).
-  transport: { hopCost: 0.05, thickMul: 0.6, treeMul: 0.5 },
+  // Crossover: a distant root beside your dig site beats the hub once the haul back to the
+  // hub exceeds ~5 hops — the routing decision should bite within the first minutes.
+  transport: { hopCost: 0.08, thickMul: 0.6, treeMul: 0.5 },
 
   reveal: { base: 3, hint: 2 },         // fog reveal radius (tiles) + hint band beyond
 
@@ -71,10 +77,11 @@ export const CONFIG = {
 
 // Organic-matter node richness tiers. size = tile footprint radius hint; reserve = N units.
 const N_TIERS = {
-  small:  { reserve: 55,  span: 1 },
-  medium: { reserve: 120, span: 1 },
-  large:  { reserve: 210, span: 2 },
-  gusher: { reserve: 340, span: 2 },
+  small:      { reserve: 55,  span: 1 },
+  medium:     { reserve: 120, span: 1 },
+  large:      { reserve: 210, span: 2 },
+  gusher:     { reserve: 340, span: 2 },
+  motherlode: { reserve: 600, span: 2 },  // deep-only jackpot — the reason to dig
 };
 
 // ---- seeded RNG (mulberry32) ------------------------------------------------
@@ -239,9 +246,11 @@ export function createSim(seed) {
     if (spot) placeNode(spot.x, spot.y, tier);
   }
   // Deep reserves in the subsoil/rock — locked behind FORAGING T3 (deep extraction).
-  for (let i = 0; i < 2; i++) {
+  // A guaranteed MOTHERLODE plus two rich companions: more than half the map's nitrogen
+  // is down here, so the shallow game running dry is an invitation, not an ending.
+  for (const tier of ['motherlode', rng() < 0.5 ? 'large' : 'gusher', rng() < 0.5 ? 'large' : 'gusher']) {
     const spot = randNodeSpot(Math.floor(H * 0.6), H - 2);
-    if (spot) placeNode(spot.x, spot.y, rng() < 0.5 ? 'large' : 'gusher');
+    if (spot) placeNode(spot.x, spot.y, tier);
   }
 
   // --- buried logs (free burst growth on contact; not a banked resource) ---
@@ -266,8 +275,11 @@ export function createSim(seed) {
   ct.node = false; ct.nodeId = -1; ct.root = false; ct.rootId = -1; ct.log = false; ct.logId = -1;
 
   // --- state ---
+  const reserveTotal = nodes.reduce((s, n) => s + n.reserve, 0);
   const state = {
     seed, W, H, AIR_ROWS: C.AIR_ROWS, groundY, tiles, nodes, trees, logs, core, trunkX,
+    reserveTotal, reserveLeft: reserveTotal,  // nitrogen still buried, map-wide (the run's clock)
+    reserveLocked: nodes.reduce((s, n) => s + (n.deep ? n.reserve : 0), 0), // deep share, locked at start
     res: { ...C.start },
     upg: { foraging: 0, mycelium: 0, symbiosis: 0 },
     size: 1, peak: 1, time: 0,
@@ -459,10 +471,19 @@ export function createSim(seed) {
       }
       n.contacts = seen.size;
       if (!n.contacts) continue;
-      const rate = C.nitrogenPerContact * n.contacts * extractMult();
+      const rate = C.nitrogenPerContact * n.contacts * extractMult() * (n.deep ? C.deepBonus : 1);
       const y = Math.min(rate * dt, n.reserve);
       n.reserve -= y; n.rate = y / dt; nGain += y;
+      if (n.reserve <= 0) {                     // mined dry this tick — mark the moment
+        const c = n.tiles[(n.tiles.length / 2) | 0];
+        state.fx.push({ kind: 'deplete', x: c.x, y: c.y, t: 1.4, max: 1.4 });
+      }
       if (n.rate > 0) for (const i of seen) activeSrc.push(i);   // these tiles feed the routing BFS
+    }
+    state.reserveLeft = 0; state.reserveLocked = 0;
+    for (const n of state.nodes) {
+      state.reserveLeft += n.reserve;
+      if (n.deep && !deepUnlocked()) state.reserveLocked += n.reserve;  // buried below the T3 line
     }
 
     // Fungal-hop distance field: how many network steps from the nearest ACTIVE mining site
@@ -588,7 +609,9 @@ export function createSim(seed) {
     for (const n of state.nodes) {
       if (!n.revealed) n.revealed = n.tiles.some(c => tileAt(c.x, c.y).revealed);
       if (n.revealed) { n.hinted = false; continue; }
-      if (n.reserve <= 0 || (n.deep && !deepUnlocked())) { n.hinted = false; continue; }
+      // Locked deep nodes still hint — the player should FEEL the wealth below before
+      // they can touch it; the renderer tints deep hints cool so they read as "later".
+      if (n.reserve <= 0) { n.hinted = false; continue; }
       // Is any network tile within the hint band but outside reveal?
       let near = false;
       for (const c of n.tiles) {
@@ -607,7 +630,10 @@ export function createSim(seed) {
   function gameOver(cause) {
     if (state.over) return;
     state.over = true;
-    state.result = { peak: state.peak, time: state.time, seed, cause, size: state.size };
+    // Starving with the map mined dry is the EARNED ending — you spent the whole world.
+    if (cause === 'starved' && state.reserveLeft < 1) cause = 'exhausted';
+    state.result = { peak: state.peak, time: state.time, seed, cause, size: state.size,
+                     nitrogenLeft: Math.round(state.reserveLeft) };
   }
 
   function decayFx(dt) { for (let i = state.fx.length - 1; i >= 0; i--) { state.fx[i].t -= dt; if (state.fx[i].t <= 0) state.fx.splice(i, 1); } }

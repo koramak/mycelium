@@ -12,7 +12,7 @@ const PAL = {
   fog: '#0a0b10', fogEdge: '#12131c',
   hypha: '#eafff1', glow: 'rgba(150,255,205,0.10)', core: '#c4ffdd',
   nitro: '#6ee86e', sugar: '#ffd23f',           // green nitrogen · yellow sugar
-  node: '#3a5a2e', nodeBright: '#9be86a', nodeDeep: '#48506a',
+  node: '#3a5a2e', nodeBright: '#9be86a', nodeDeep: '#4f5c8c',
   root: '#7a5a38', rootLive: '#ffd23f',
   log: '#6b4a26', logGrain: '#8a5e30',
   ghost: 'rgba(170,255,215,0.20)',
@@ -210,10 +210,12 @@ export function createRenderer(canvas, sim) {
     const pulse = 0.5 + 0.5 * Math.sin(st.time * 2);
     for (const n of st.nodes) {
       if (!n.hinted || n.revealed) continue;
+      const deep = n.deep && st.upg.foraging < 3;   // cool tint = wealth you can't touch YET
       for (const c of n.tiles) {
         const t = st.tiles[c.y * W + c.x];
         if (t.revealed) continue; // hint only shows on still-dark soil
-        ctx.fillStyle = `rgba(120,150,90,${0.05 + 0.06 * pulse})`;
+        ctx.fillStyle = deep ? `rgba(115,130,210,${0.05 + 0.06 * pulse})`
+                             : `rgba(120,150,90,${0.05 + 0.06 * pulse})`;
         ctx.fillRect(cx(c.x), cy(c.y), TILE, TILE);
       }
     }
@@ -230,27 +232,51 @@ export function createRenderer(canvas, sim) {
       const active = n.rate > 0.05;
       for (const c of n.tiles) {
         const px = cx(c.x), py = cy(c.y);
+        if (dead) {
+          // mined dry — a sunken, rotted husk collapsing back into the soil
+          ctx.fillStyle = '#241f18'; ctx.fillRect(px + 2, py + 3, TILE - 4, TILE - 5);
+          ctx.fillStyle = '#332e25';
+          if (noise(c.x, c.y) > -0.2) ctx.fillRect(px + 4, py + 5, 3, 2);
+          ctx.fillRect(px + TILE - 6, py + TILE - 6, 2, 2);
+          ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(px + 2, py + 3, TILE - 4, 2); // sunken lip
+          continue;
+        }
         // organic clump
-        ctx.fillStyle = dead ? '#3a352c' : (locked ? PAL.nodeDeep : PAL.node);
+        ctx.fillStyle = locked ? PAL.nodeDeep : PAL.node;
         ctx.fillRect(px + 1, py + 1, TILE - 2, TILE - 2);
-        ctx.fillStyle = dead ? '#2c281f' : 'rgba(0,0,0,0.25)';
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
         if (noise(c.x, c.y) > 0) ctx.fillRect(px + 3, py + 5, 4, 3);
+        if (locked && noise(c.x + 7, c.y) > 0.1) {  // mineral flecks — buried treasure, not rock
+          ctx.fillStyle = 'rgba(160,180,240,0.35)'; ctx.fillRect(px + 8, py + 4, 2, 2);
+        }
       }
       // nutrient glow — brighter & larger with richness, pulses while extracting
       if (!dead && !locked) {
         const center = n.tiles[(n.tiles.length / 2) | 0];
         const gx = mx(center.x), gy = my(center.y);
+        const lode = n.tier === 'motherlode';
         const pulse = active ? (0.6 + 0.4 * Math.sin(st.time * 6)) : 0.5;
-        const rad = TILE * (0.6 + 0.9 * rich) * (0.85 + 0.25 * pulse) * (0.4 + 0.6 * frac);
+        const rad = TILE * (0.6 + 0.9 * rich) * (lode ? 1.35 : 1) * (0.85 + 0.25 * pulse) * (0.4 + 0.6 * frac);
         const g = ctx.createRadialGradient(gx, gy, 1, gx, gy, rad);
-        g.addColorStop(0, `rgba(155,232,106,${(0.30 + 0.4 * rich) * (active ? 1 : 0.7)})`);
+        if (lode) g.addColorStop(0, `rgba(220,255,180,${(0.5) * (active ? 1 : 0.75)})`); // white-hot heart
+        g.addColorStop(lode ? 0.35 : 0, `rgba(155,232,106,${(0.30 + 0.4 * rich) * (active ? 1 : 0.7)})`);
         g.addColorStop(1, 'rgba(155,232,106,0)');
         ctx.fillStyle = g; ctx.beginPath(); ctx.arc(gx, gy, rad, 0, 7); ctx.fill();
       }
-      if (locked) { // padlock-ish marker: deep reserve awaiting FORAGING T3
+      if (locked) { // deep reserve awaiting FORAGING T3 — shimmer like treasure, lock like a door
         const center = n.tiles[(n.tiles.length / 2) | 0];
-        ctx.fillStyle = 'rgba(180,190,220,0.5)';
-        ctx.fillRect(mx(center.x) - 2, my(center.y) - 2, 4, 4);
+        const gx = mx(center.x), gy = my(center.y);
+        const pulse = 0.5 + 0.5 * Math.sin(st.time * 1.6 + n.id * 2.1);   // slow heartbeat
+        const rad = TILE * (0.8 + 1.1 * rich) * (0.8 + 0.3 * pulse);
+        const g = ctx.createRadialGradient(gx, gy, 1, gx, gy, rad);
+        g.addColorStop(0, `rgba(130,150,230,${0.12 + 0.16 * rich * pulse})`);
+        g.addColorStop(1, 'rgba(130,150,230,0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(gx, gy, rad, 0, 7); ctx.fill();
+        // padlock glyph: shackle + body + keyhole
+        ctx.strokeStyle = 'rgba(205,215,245,0.9)'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(gx, gy - 2, 3, Math.PI, 0); ctx.stroke();
+        ctx.fillStyle = 'rgba(205,215,245,0.9)'; ctx.fillRect(gx - 4, gy - 2, 8, 7);
+        ctx.fillStyle = '#2c3050'; ctx.fillRect(gx - 1, gy, 2, 3);
       }
     }
   }
@@ -504,12 +530,20 @@ export function createRenderer(canvas, sim) {
     const st = sim.state;
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
     for (const f of st.fx) {
-      if (f.kind !== 'burst') continue;
       const a = f.t / f.max;
-      const r = TILE * (1.2 - a) * 1.1;
-      const g = ctx.createRadialGradient(mx(f.x), my(f.y), 1, mx(f.x), my(f.y), r + 1);
-      g.addColorStop(0, `rgba(180,255,210,${0.5 * a})`); g.addColorStop(1, 'rgba(180,255,210,0)');
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(mx(f.x), my(f.y), r + 1, 0, 7); ctx.fill();
+      if (f.kind === 'burst') {
+        const r = TILE * (1.2 - a) * 1.1;
+        const g = ctx.createRadialGradient(mx(f.x), my(f.y), 1, mx(f.x), my(f.y), r + 1);
+        g.addColorStop(0, `rgba(180,255,210,${0.5 * a})`); g.addColorStop(1, 'rgba(180,255,210,0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(mx(f.x), my(f.y), r + 1, 0, 7); ctx.fill();
+      } else if (f.kind === 'deplete') {
+        // a dull ring sighing outward — this node just gave its last nitrogen
+        const r = TILE * (0.4 + (1 - a) * 2.4);
+        ctx.strokeStyle = `rgba(150,175,110,${0.55 * a})`; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(mx(f.x), my(f.y), r, 0, 7); ctx.stroke();
+        ctx.strokeStyle = `rgba(90,100,70,${0.35 * a})`; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(mx(f.x), my(f.y), r * 0.6, 0, 7); ctx.stroke();
+      }
     }
     ctx.restore();
   }
